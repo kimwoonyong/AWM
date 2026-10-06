@@ -1,0 +1,70 @@
+<Window x:Class="AWM.Views.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:m="clr-namespace:AWM.Models"
+        Title="설정" Width="540" SizeToContent="Height" ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+    <Window.Resources>
+        <Style x:Key="Section" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,14,0,6" />
+        </Style>
+        <Style x:Key="Hint" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="#888888" />
+            <Setter Property="Margin" Value="6,0,0,0" />
+        </Style>
+        <Style TargetType="RadioButton">
+            <Setter Property="Margin" Value="0,2" />
+            <Setter Property="VerticalContentAlignment" Value="Center" />
+        </Style>
+    </Window.Resources>
+
+    <StackPanel Margin="16,4,16,16">
+        <TextBlock Text="글 분량" Style="{StaticResource Section}" />
+        <RadioButton GroupName="Length" IsChecked="{Binding IsShort}">
+            <StackPanel Orientation="Horizontal"><TextBlock Text="짧게" /><TextBlock Text="800~1,200자" Style="{StaticResource Hint}" /></StackPanel>
+        </RadioButton>
+        <RadioButton GroupName="Length" IsChecked="{Binding IsNormal}">
+            <StackPanel Orientation="Horizontal"><TextBlock Text="보통" /><TextBlock Text="1,500~2,500자" Style="{StaticResource Hint}" /></StackPanel>
+        </RadioButton>
+        <RadioButton GroupName="Length" IsChecked="{Binding IsLong}">
+            <StackPanel Orientation="Horizontal"><TextBlock Text="길게" /><TextBlock Text="3,000~4,000자" Style="{StaticResource Hint}" /></StackPanel>
+        </RadioButton>
+
+        <TextBlock Text="말투" Style="{StaticResource Section}" />
+        <RadioButton GroupName="Tone" Content="친근한 존댓말" IsChecked="{Binding IsFriendly}" />
+        <RadioButton GroupName="Tone" Content="담백한 정보형" IsChecked="{Binding IsInformative}" />
+        <RadioButton GroupName="Tone" Content="일기체 반말" IsChecked="{Binding IsDiary}" />
+        <RadioButton GroupName="Tone" Content="직접 쓰기" IsChecked="{Binding IsCustom}" />
+        <!-- 직접 쓴 지침은 길어진다 — Enter 는 줄바꿈(저장은 버튼), 약 4줄에서 10줄까지 늘고 그 뒤 스크롤, 2,000자 넘게는 입력 안 됨 (D-013) -->
+        <TextBox Text="{Binding CustomTone, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding IsCustom}"
+                 Margin="20,4,0,0" Padding="4" AcceptsReturn="True" TextWrapping="Wrap"
+                 MinHeight="76" MaxHeight="180" VerticalScrollBarVisibility="Auto" MaxLength="{x:Static m:AppSettings.CustomToneLimit}"
+                 ToolTip="Claude 에게 줄 말투·문체 지침. 여러 줄로 써도 됩니다(Enter 줄바꿈). 비워 두면 친근한 존댓말" />
+        <TextBlock Text="{Binding CustomToneCount}" Style="{StaticResource Hint}" HorizontalAlignment="Right" Margin="0,2,0,0" />
+
+        <TextBlock Text="태그 개수" Style="{StaticResource Section}" />
+        <StackPanel Orientation="Horizontal">
+            <TextBox Text="{Binding TagMinText, UpdateSourceTrigger=PropertyChanged}" Width="56" Padding="4" />
+            <TextBlock Text="~" Margin="8,0" VerticalAlignment="Center" />
+            <TextBox Text="{Binding TagMaxText, UpdateSourceTrigger=PropertyChanged}" Width="56" Padding="4" />
+            <TextBlock Text="개 (1~30)" Style="{StaticResource Hint}" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <TextBlock Text="초안 저장 위치" Style="{StaticResource Section}" />
+        <DockPanel>
+            <Button DockPanel.Dock="Right" Content="기본값" Command="{Binding DefaultFolderCommand}" Padding="10,2" Margin="6,0,0,0" />
+            <Button DockPanel.Dock="Right" Content="바꾸기" Command="{Binding ChangeFolderCommand}" Padding="10,2" Margin="6,0,0,0" />
+            <TextBox Text="{Binding FolderDisplay, Mode=OneWay}" IsReadOnly="True" Padding="4" />
+        </DockPanel>
+        <TextBlock Text="위치를 바꿔도 기존 초안은 옮겨지지 않습니다 (탐색기로 옮길 수 있습니다)." Foreground="#B26A00"
+                   Margin="0,4,0,0" TextWrapping="Wrap" />
+
+        <TextBlock Text="{Binding Error}" Foreground="#C62828" Margin="0,12,0,0" TextWrapping="Wrap" />
+
+        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,12,0,0">
+            <Button Content="저장" Command="{Binding SaveCommand}" IsDefault="True" Padding="20,4" />
+            <Button Content="취소" IsCancel="True" Padding="20,4" Margin="8,0,0,0" />
+        </StackPanel>
+    </StackPanel>
+</Window>

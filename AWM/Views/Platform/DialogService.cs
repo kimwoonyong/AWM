@@ -1,4 +1,5 @@
 using System.Windows;
+using AWM.Models;
 using AWM.Services.Interfaces;
 using AWM.ViewModels;
 using AWM.Views;
@@ -43,6 +44,19 @@ public sealed class DialogService(IDraftStore store) : IDialogService
             Filter = "사진 (jpg, png, gif, webp)|*.jpg;*.jpeg;*.png;*.gif;*.webp",
         };
         return dialog.ShowDialog(Owner) == true ? dialog.FileNames : [];
+    }
+
+    public AppSettings? EditSettings(AppSettings current, string defaultDraftsFolder)
+    {
+        var viewModel = new SettingsViewModel(current, defaultDraftsFolder, PickFolder);
+        var window = new SettingsWindow(viewModel) { Owner = Owner };
+        return window.ShowDialog() == true ? viewModel.Result : null;
+    }
+
+    private string? PickFolder(string initial)
+    {
+        var dialog = new Microsoft.Win32.OpenFolderDialog { Title = "초안 저장 위치", InitialDirectory = initial };
+        return dialog.ShowDialog(Owner) == true ? dialog.FolderName : null;
     }
 
     private MessageBoxResult Show(string text, MessageBoxButton buttons, MessageBoxImage icon) =>

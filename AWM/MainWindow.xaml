@@ -32,7 +32,11 @@
         <!-- 입력 -->
         <Border Grid.Column="0" BorderBrush="#DDDDDD" BorderThickness="0,0,1,0" Padding="16">
             <DockPanel LastChildFill="False">
-                <TextBlock DockPanel.Dock="Top" Text="입력" FontWeight="SemiBold" FontSize="14" />
+                <DockPanel DockPanel.Dock="Top">
+                    <Button DockPanel.Dock="Right" Content="설정" Command="{Binding OpenSettingsCommand}" Padding="12,2"
+                            ToolTip="글 분량·말투·태그 개수·초안 저장 위치" />
+                    <TextBlock Text="입력" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center" />
+                </DockPanel>
 
                 <TextBlock DockPanel.Dock="Top" Text="주제 (필수)" Style="{StaticResource FieldLabel}" />
                 <TextBox DockPanel.Dock="Top" Text="{Binding Topic, UpdateSourceTrigger=PropertyChanged}" Padding="4" />
@@ -114,10 +118,8 @@
                 <WrapPanel Margin="0,4,0,0">
                     <Button Content="네이버로 보내기" Command="{Binding SendToNaverCommand}" Padding="12,4" Margin="0,4,6,0"
                             ToolTip="크롬으로 네이버 글쓰기를 열고 단축키 Ctrl+Alt+V 를 10분 동안 켭니다" />
-                    <Button Content="다시 붙이기" Command="{Binding RearmCommand}" Padding="10,4" Margin="0,4,6,0"
+                    <Button Content="다시 붙이기" Command="{Binding RearmCommand}" Padding="10,4" Margin="0,4,18,0"
                             ToolTip="크롬을 새로 열지 않고 단축키만 다시 켭니다 — 열어 둔 글쓰기 탭에서 다시 붙일 때" />
-                    <Button Content="네이버용 복사" Command="{Binding CopyForNaverCommand}" Padding="12,4" Margin="0,4,18,0"
-                            ToolTip="소제목·인용·목록·구분선을 살린 본문을 복사합니다(사진 제외)" />
                     <Button Content="불러오기" Command="{Binding OpenListCommand}" Padding="12,4" Margin="0,4,6,0" />
                     <Button Content="저장" Command="{Binding SaveCommand}" Padding="16,4" Margin="0,4,0,0" />
                 </WrapPanel>
@@ -130,7 +132,8 @@
             <TextBox Grid.Row="2" Text="{Binding Title, UpdateSourceTrigger=PropertyChanged}" Padding="4" />
 
             <DockPanel Grid.Row="3">
-                <Button DockPanel.Dock="Right" Content="복사" Command="{Binding CopyBodyCommand}" Style="{StaticResource CopyButton}" />
+                <Button DockPanel.Dock="Right" Content="복사" Command="{Binding CopyBodyCommand}" Style="{StaticResource CopyButton}"
+                        ToolTip="소제목·인용·목록 서식을 살린 본문과 태그를 복사합니다(사진 제외). 서식 없이 붙이려면 붙일 곳에서 Ctrl+Shift+V" />
                 <TextBlock Text="본문 (## 소제목 · &gt; 인용 · - 목록 · --- 구분선 · [사진: 설명 | 01.jpg])" Style="{StaticResource FieldLabel}"
                            TextTrimming="CharacterEllipsis" />
             </DockPanel>

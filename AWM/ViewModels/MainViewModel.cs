@@ -23,6 +23,8 @@ public sealed class MainViewModel : ObservableObject
     private readonly IBrowserLauncher _browser;
     private readonly IImageShrinker _shrinker;
     private readonly PasteSequencer _sequencer;
+    private readonly ISettingsStore _settings;
+    private readonly string _defaultDraftsFolder;
     private IGlobalHotkey? _hotkey;
     private CancellationTokenSource? _generation;
 
@@ -47,8 +49,11 @@ public sealed class MainViewModel : ObservableObject
     private string _status = "주제를 입력하고 「초안 만들기」를 누르세요.";
 
     public MainViewModel(IDraftService drafts, IClipboardService clipboard, IDraftStore store, IDialogService dialogs,
-        IBrowserLauncher browser, IImageShrinker shrinker, PasteSequencer sequencer)
+        IBrowserLauncher browser, IImageShrinker shrinker, PasteSequencer sequencer, ISettingsStore settings,
+        string defaultDraftsFolder)
     {
+        _settings = settings;
+        _defaultDraftsFolder = defaultDraftsFolder;
         _drafts = drafts;
         _clipboard = clipboard;
         _store = store;
@@ -61,8 +66,8 @@ public sealed class MainViewModel : ObservableObject
         CancelCommand = new RelayCommand(_ => CancelGeneration(), _ => IsBusy);
         CopyTitleCommand = new RelayCommand(_ => Copy(Title, "제목을 복사했습니다."), _ => Title.Length > 0);
         // 텍스트로 붙일 곳에는 표시 기호(##·>·---)와 사진 줄을 빼고 넘긴다. 태그 줄은 끝에 함께 (add-naver-blog-format D-008·D-010)
-        CopyBodyCommand = new RelayCommand(_ => Copy(FormatBody().PlainText, "본문과 태그를 복사했습니다."), _ => Body.Length > 0);
-        CopyForNaverCommand = new RelayCommand(_ => CopyForNaver(), _ => Body.Length > 0);
+        // 서식 있는 글(HTML)과 같은 서식 없는 글을 함께 넣는다 — 네이버는 서식이, 메모장 등은 글만 붙는다 (merge-copy-buttons D-001)
+        CopyBodyCommand = new RelayCommand(_ => CopyFormattedBody(), _ => Body.Length > 0);
         SendToNaverCommand = new RelayCommand(_ => SendToNaver(), _ => Body.Length > 0);
         SaveCommand = new RelayCommand(async _ => await SaveAsync(), _ => !IsBusy && HasContent);
         OpenListCommand = new RelayCommand(async _ => await OpenFromListAsync(), _ => !IsBusy);
@@ -70,13 +75,15 @@ public sealed class MainViewModel : ObservableObject
         PlacePhotosCommand = new RelayCommand(async _ => await PlacePhotosAsync(),
             _ => !IsBusy && Body.Trim().Length > 0 && Photos.Any(photo => !photo.IsPlaced && !photo.IsMissing));
         RearmCommand = new RelayCommand(_ => Rearm(), _ => Body.Length > 0 && _hotkey is not null && !_pasting);
+        OpenSettingsCommand = new RelayCommand(async _ => await OpenSettingsAsync(), _ => !IsBusy);
     }
+
+    public RelayCommand OpenSettingsCommand { get; }
 
     public RelayCommand GenerateCommand { get; }
     public RelayCommand CancelCommand { get; }
     public RelayCommand CopyTitleCommand { get; }
     public RelayCommand CopyBodyCommand { get; }
-    public RelayCommand CopyForNaverCommand { get; }
     public RelayCommand SendToNaverCommand { get; }
     public RelayCommand SaveCommand { get; }
     public RelayCommand OpenListCommand { get; }
@@ -141,7 +148,6 @@ public sealed class MainViewModel : ObservableObject
             if (!Set(ref _body, value))
                 return;
             CopyBodyCommand.RaiseCanExecuteChanged();
-            CopyForNaverCommand.RaiseCanExecuteChanged();
             SendToNaverCommand.RaiseCanExecuteChanged();
             RearmCommand.RaiseCanExecuteChanged();
             RefreshPhotos();
@@ -172,6 +178,7 @@ public sealed class MainViewModel : ObservableObject
             OpenListCommand.RaiseCanExecuteChanged();
             AddPhotosCommand.RaiseCanExecuteChanged();
             PlacePhotosCommand.RaiseCanExecuteChanged();
+            OpenSettingsCommand.RaiseCanExecuteChanged();
         }
     }
 
@@ -496,6 +503,47 @@ public sealed class MainViewModel : ObservableObject
         }
     }
 
+    // ===== 설정
+
+    /// <summary>
+    /// 시작할 때 설정 파일을 읽으며 생긴 알림(깨진 파일 등)을 상태 줄에 한 번.
+    /// </summary>
+    public void ShowNotice(string? message)
+    {
+        if (message is not null)
+            Report(message, isError: true);
+    }
+
+    private async Task OpenSettingsAsync()
+    {
+        var edited = _dialogs.EditSettings(_settings.Current, _defaultDraftsFolder);
+        if (edited is null)
+            return;
+
+        var oldRoot = _store.Root;
+        var newRoot = edited.DraftsFolder ?? _defaultDraftsFolder;
+        var rootChanged = !string.Equals(Path.GetFullPath(newRoot).TrimEnd('\\'), Path.GetFullPath(oldRoot).TrimEnd('\\'),
+            StringComparison.OrdinalIgnoreCase);
+        try
+        {
+            // 폴더를 먼저 만들어 본다 — 쓸 수 없는 위치면 설정을 저장하지 않는다 (add-settings D-010)
+            if (rootChanged)
+                _store.ChangeRoot(newRoot);
+            await _settings.SaveAsync(edited);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
+        {
+            if (rootChanged && !string.Equals(_store.Root, oldRoot, StringComparison.OrdinalIgnoreCase))
+                _store.ChangeRoot(oldRoot);
+            Report($"설정을 저장하지 못했습니다: {ex.Message}", isError: true);
+            return;
+        }
+
+        // 지침은 생성할 때마다 설정을 읽는다 — 다음 글부터 바로 (add-settings D-012)
+        Report("설정을 저장했습니다 — 다음 글부터 적용됩니다."
+               + (rootChanged ? $" 저장 위치: {newRoot} (기존 초안은 옮겨지지 않았습니다)" : ""));
+    }
+
     // ===== 사진
 
     private sealed record PhotoSource(string FileName, string? Path);
@@ -688,12 +736,12 @@ public sealed class MainViewModel : ObservableObject
     // 태그 줄은 본문 끝에 붙인다 — 네이버가 본문의 #단어를 태그로 등록한다 [실측] (add-naver-blog-format D-010)
     private FormattedBody FormatBody() => NaverFormat.Format(Body, ParseTags(TagsText));
 
-    private bool CopyForNaver()
+    private bool CopyFormattedBody()
     {
         var formatted = FormatBody();
         if (_clipboard.TrySetHtml(formatted.Html, formatted.PlainText))
         {
-            Report("본문과 태그를 네이버용으로 복사했습니다(사진 제외). 네이버 글쓰기 본문 칸에 Ctrl+V 하세요.");
+            Report("본문과 태그를 복사했습니다(서식 포함·사진 제외).");
             return true;
         }
 
@@ -707,7 +755,7 @@ public sealed class MainViewModel : ObservableObject
     /// </summary>
     private void SendToNaver()
     {
-        if (!CopyForNaver())
+        if (!CopyFormattedBody())
             return;
 
         try

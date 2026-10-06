@@ -10,6 +10,12 @@ public interface IDraftStore
     string Root { get; }
 
     /// <summary>
+    /// 저장 위치를 바꾼다(없으면 만든다). 목록·새 초안이 새 위치를 쓴다. 이미 연 초안은 제 폴더 경로를 들고 있어 영향 없다.
+    /// 만들 수 없으면 IOException·UnauthorizedAccessException — 그때는 바꾸지 않는다 (add-settings D-010).
+    /// </summary>
+    void ChangeRoot(string root);
+
+    /// <summary>
     /// 새 폴더 「yyyy-MM-dd HHmm (제목)」을 만들어 저장한다. 이름이 겹치면 " (2)" 부터 붙인다.
     /// </summary>
     Task<StoredDraft> CreateAsync(SavedDraft draft);

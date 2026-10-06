@@ -1,3 +1,5 @@
+using AWM.Models;
+
 namespace AWM.Services.Interfaces;
 
 /// <summary>
@@ -24,4 +26,9 @@ public interface IDialogService
     /// 사진 파일 고르기(여러 장, jpg·jpeg·png·gif·webp — D-011). 닫으면 빈 목록.
     /// </summary>
     IReadOnlyList<string> PickImages();
+
+    /// <summary>
+    /// 설정 창. 저장하면 바뀐 설정, 취소하면 null. 파일에 쓰지는 않는다.
+    /// </summary>
+    AppSettings? EditSettings(AppSettings current, string defaultDraftsFolder);
 }

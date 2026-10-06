@@ -22,7 +22,13 @@ public sealed class DraftStore(string root) : IDraftStore
         Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    public string Root { get; } = root;
+    public string Root { get; private set; } = root;
+
+    public void ChangeRoot(string root)
+    {
+        Directory.CreateDirectory(root);
+        Root = root;
+    }
 
     public async Task<StoredDraft> CreateAsync(SavedDraft draft)
     {

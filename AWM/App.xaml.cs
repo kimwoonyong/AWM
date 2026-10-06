@@ -20,14 +20,20 @@ public partial class App : Application
         base.OnStartup(e);
         DispatcherUnhandledException += OnDispatcherUnhandledException;
 
-        var drafts = new DraftService(new ClaudeCli());
+        // 설정을 먼저 읽는다 — 저장 위치가 설정에 있다
+        var settings = new SettingsStore(SettingsStore.DefaultFilePath);
+        var notice = settings.Load();
+
+        var drafts = new DraftService(new ClaudeCli(), settings);
         // 문서 폴더가 OneDrive 등으로 옮겨져 있어도 따라가도록 알려진 폴더로 찾는다
-        var store = new DraftStore(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "AWM", "drafts"));
+        var defaultDraftsFolder = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "AWM", "drafts");
+        var store = new DraftStore(settings.Current.DraftsFolder ?? defaultDraftsFolder);
         var dialogs = new DialogService(store);
         var clipboard = new ClipboardService();
         var sequencer = new PasteSequencer(clipboard, new KeyboardSender(), PasteTimings.Default);
-        _viewModel = new MainViewModel(drafts, clipboard, store, dialogs, new ChromeLauncher(), new ImageShrinker(), sequencer);
+        _viewModel = new MainViewModel(drafts, clipboard, store, dialogs, new ChromeLauncher(), new ImageShrinker(), sequencer,
+            settings, defaultDraftsFolder);
+        _viewModel.ShowNotice(notice);
 
         var window = new MainWindow(_viewModel);
         dialogs.Owner = window;

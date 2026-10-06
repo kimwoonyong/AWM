@@ -1,0 +1,9 @@
+<Application x:Class="TextBean.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:TextBean">
+    <!-- StartupUri 를 두면 창이 두 번 뜬다. 창 생성은 App.ComposeAsync 가 맡는다. -->
+    <Application.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVisibility" />
+    </Application.Resources>
+</Application>

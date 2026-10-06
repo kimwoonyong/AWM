@@ -1,0 +1,11 @@
+# 빌드 결과 (게시본 publish 도 bin 안에 생긴다)
+bin/
+obj/
+
+# Visual Studio 작업 폴더 · 개인 설정
+.vs/
+*.user
+*.suo
+
+# 시험 결과
+TestResults/

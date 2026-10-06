@@ -1,0 +1,56 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+	<RuntimeIdentifier>win-x64</RuntimeIdentifier>
+	<PublishSingleFile>true</PublishSingleFile>
+	<SelfContained>true</SelfContained>
+	<IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+	<PublishReadyToRun>true</PublishReadyToRun>
+	<DebugType>none</DebugType>
+	  
+	<OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+
+    <!-- 이 프로젝트 파일이 솔루션 루트에 있어 기본 글롭이 TextBean.Tests\** 까지 빨아들인다.
+         제외하지 않으면 테스트 코드가 WPF 실행 파일에 컴파일돼 들어간다. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);TextBean.Tests\**</DefaultItemExcludes>
+
+    <!-- .trash\<타임스탬프>\ 접두사가 경로를 늘리므로 긴 경로 옵트인이 필요하다 -->
+    <ApplicationManifest>Properties\app.manifest</ApplicationManifest>
+
+    <!-- 파일 복사가 아니라 컴파일러 경로다 — csc 의 /win32icon 으로 들어가 exe 의 Win32 리소스
+         (RT_GROUP_ICON + RT_ICON)에 박힌다. 단일 파일 게시에서도 9개 프레임이 그대로 살아남는다 [실측].
+
+         Window 에 Icon= 을 두지 않는다. 두지 않으면 WPF 가 창마다 exe 에서 직접 읽어
+         MainWindow · SearchWindow · 대화상자가 전부 이 아이콘을 받는다(Owner 상속이 아니다).
+         반대로 팩 URI 로 지정하면 .ico 의 첫 프레임 하나만 디코드돼 축소본이 쓰여 화질이 나빠지고,
+         XAML 에 Icon="Assets\app.ico" 처럼 상대 경로를 쓰면 pack 리소스로 해석돼 앱이 아예 안 뜬다 [실측].
+
+         창 아이콘용으로 Content/Resource 를 중복 등록하지 않는다 — 게시본만 53KB 커지고 얻는 것이 없다.
+         (트레이 아이콘은 예외다 — 아래 EmbeddedResource. 실행 중 자기 exe 를 파일로 읽지 않으려고 53KB 를 받아들였다, D-094)
+         파일이 없으면 CS7064 로 빌드가 멈춘다. TextBean.Tests 도 이 프로젝트를 참조하므로
+         dotnet test 까지 같이 멈춘다 — 안전장치이지만 알고 있어야 한다.
+
+         아이콘을 나중에 고칠 때 주의: 내용만 바꾸고 타임스탬프가 과거이면
+         경고 0 · 성공인 채로 옛 아이콘이 그대로 남는다. 반드시 클린 빌드로 확인한다. -->
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+
+    <!-- 알림 영역(트레이) 아이콘 · 메뉴는 WinForms NotifyIcon 이다 (D-093). 새 패키지 없이 런타임에 들어 있고,
+         탐색기 재시작 뒤 다시 등록 · 메뉴 앞 창 만들기를 프레임워크가 맡는다. 게시본이 약 35MB 커진다(사용자 수용). -->
+    <UseWindowsForms>true</UseWindowsForms>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 이 두 줄을 지우면 WPF 와 20개 이름(Application · MessageBox · Point · Brush …)이 72곳에서 충돌한다 [실측].
+         WinForms 형식은 TrayIcon.cs 에서만 별칭으로 쓴다. -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+
+    <!-- 트레이 아이콘 그림. 이름은 TrayIcon.cs 의 IconResource 와 같아야 한다 (D-094) -->
+    <EmbeddedResource Include="Assets\app.ico" LogicalName="TextBean.TrayIcon.ico" />
+  </ItemGroup>
+
+</Project>

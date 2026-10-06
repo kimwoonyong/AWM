@@ -1,4 +1,0 @@
-<Solution>
-  <Project Path="TextBean.csproj" />
-  <Project Path="TextBean.Tests/TextBean.Tests.csproj" />
-</Solution>

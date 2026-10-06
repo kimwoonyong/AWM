@@ -34,6 +34,17 @@ public sealed class DialogService(IDraftStore store) : IDialogService
         return window.ShowDialog() == true ? viewModel.Selected?.Folder : null;
     }
 
+    public IReadOnlyList<string> PickImages()
+    {
+        var dialog = new Microsoft.Win32.OpenFileDialog
+        {
+            Title = "사진 추가",
+            Multiselect = true,
+            Filter = "사진 (jpg, png, gif, webp)|*.jpg;*.jpeg;*.png;*.gif;*.webp",
+        };
+        return dialog.ShowDialog(Owner) == true ? dialog.FileNames : [];
+    }
+
     private MessageBoxResult Show(string text, MessageBoxButton buttons, MessageBoxImage icon) =>
         Owner is null
             ? MessageBox.Show(text, "AWM", buttons, icon)

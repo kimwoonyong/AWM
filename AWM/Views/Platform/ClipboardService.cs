@@ -26,6 +26,14 @@ public sealed class ClipboardService : IClipboardService
         return TrySet(() => Clipboard.SetDataObject(data, copy: true));
     }
 
+    public bool TrySetFiles(IReadOnlyList<string> paths)
+    {
+        var files = new System.Collections.Specialized.StringCollection();
+        foreach (var path in paths)
+            files.Add(path);
+        return TrySet(() => Clipboard.SetFileDropList(files));
+    }
+
     /// <summary>
     /// Windows HTML 클립보드 형식(CF_HTML). 머리의 네 위치 값은 문서 처음부터의 UTF-8 바이트 수다.
     /// </summary>

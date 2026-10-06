@@ -26,4 +26,19 @@ public interface IDraftStore
     Task<DraftListResult> ListAsync();
 
     Task<StoredDraft> OpenAsync(string folder);
+
+    /// <summary>
+    /// 사진을 초안 폴더 images\NN.확장자 로 바이트 그대로 복사하고 새 파일 이름을 돌려준다 (D-005).
+    /// </summary>
+    Task<string> AddImageAsync(string folder, string sourcePath);
+
+    /// <summary>
+    /// 초안 사진의 전체 경로. 파일이 실제로 없으면 null.
+    /// </summary>
+    string? FindImage(string folder, string fileName);
+
+    /// <summary>
+    /// 사진 원본 바이트(Claude 에게 보낼 사본을 만들 때). 초안 사진이든 아직 붙이기 전 원본이든.
+    /// </summary>
+    Task<byte[]> ReadImageAsync(string path);
 }

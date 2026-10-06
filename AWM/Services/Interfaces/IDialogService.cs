@@ -19,4 +19,9 @@ public interface IDialogService
     /// 목록 창을 띄워 고른 초안 폴더를 돌려준다. 닫으면 null.
     /// </summary>
     string? PickDraft();
+
+    /// <summary>
+    /// 사진 파일 고르기(여러 장, jpg·jpeg·png·gif·webp — D-011). 닫으면 빈 목록.
+    /// </summary>
+    IReadOnlyList<string> PickImages();
 }

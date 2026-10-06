@@ -43,7 +43,8 @@ public static partial class NaverFormat
         foreach (var raw in body.ReplaceLineEndings("\n").Split('\n'))
         {
             var line = raw.Trim();
-            if (line.Length == 0)
+            // 사진 줄은 글에 넣지 않는다 — 그림은 클립보드 글에 함께 붙일 수 없다 [실측] (add-draft-images D-012)
+            if (line.Length == 0 || PhotoMarkers.IsMarker(line))
             {
                 open = null;
                 continue;

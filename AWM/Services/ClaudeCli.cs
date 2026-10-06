@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 using System.Text.Json;
+using AWM.Models;
 using AWM.Services.Interfaces;
 
 namespace AWM.Services;
@@ -15,13 +16,27 @@ public sealed class ClaudeCli : IClaudeCli
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(180);
     private static readonly UTF8Encoding Utf8NoBom = new(encoderShouldEmitUTF8Identifier: false);
 
+    // stdin 상한은 10MB [문서 — headless 조사]. 여유를 둔다
+    private const int MaxInputBytes = 8 * 1024 * 1024;
+
     // -p 는 이 변수가 있으면 묻지 않고 API 키로 과금한다 [문서]. 앱이 띄운 실행은 늘 구독으로 간다 (D-005)
     private static readonly string[] StrippedVariables = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"];
 
-    public async Task<JsonElement> RunAsync(string prompt, string systemPrompt, string jsonSchema, CancellationToken ct)
+    public Task<JsonElement> RunAsync(string prompt, string systemPrompt, string jsonSchema, CancellationToken ct) =>
+        RunAsync(prompt, [], systemPrompt, jsonSchema, ct);
+
+    public async Task<JsonElement> RunAsync(string prompt, IReadOnlyList<ImageInput> images, string systemPrompt,
+        string jsonSchema, CancellationToken ct)
     {
+        // 그림은 글 입력으로 넘길 수 없다 — stream-json 입력의 user 메시지 블록으로 넘긴다 [실측 — add-draft-images 관찰 5]
+        var withImages = images.Count > 0;
+        var input = withImages ? BuildImageMessage(prompt, images) : prompt;
+        if (withImages && Utf8NoBom.GetByteCount(input) > MaxInputBytes)
+            throw new ClaudeCliException(ClaudeCliFailure.Failed,
+                $"보낼 사진이 너무 큽니다({images.Count}장). 사진 수를 줄여 주세요.");
+
         var exe = FindExecutable();
-        using var process = new Process { StartInfo = BuildStartInfo(exe, systemPrompt, jsonSchema) };
+        using var process = new Process { StartInfo = BuildStartInfo(exe, systemPrompt, jsonSchema, withImages) };
         try
         {
             process.Start();
@@ -41,7 +56,7 @@ public sealed class ClaudeCli : IClaudeCli
 
         try
         {
-            await process.StandardInput.WriteAsync(prompt.AsMemory(), CancellationToken.None).ConfigureAwait(false);
+            await process.StandardInput.WriteAsync(input.AsMemory(), CancellationToken.None).ConfigureAwait(false);
             process.StandardInput.Close();
         }
         catch (IOException)
@@ -59,7 +74,38 @@ public sealed class ClaudeCli : IClaudeCli
             throw new ClaudeCliException(ClaudeCliFailure.TimedOut, $"응답이 {Timeout.TotalSeconds:0}초 안에 오지 않아 중단했습니다.");
         }
 
-        return Interpret(process.ExitCode, stdout, stderr);
+        // stream-json 출력은 줄마다 사건 하나다. 판정은 마지막 result 줄로 — 규칙은 json 출력과 같다 (D-006)
+        return Interpret(process.ExitCode, withImages ? LastResultLine(stdout) : stdout, stderr);
+    }
+
+    private static string BuildImageMessage(string prompt, IReadOnlyList<ImageInput> images)
+    {
+        var content = new List<object>();
+        foreach (var image in images)
+        {
+            // 그림마다 파일 이름을 붙여 어느 그림이 어느 파일인지 알게 한다
+            content.Add(new { type = "text", text = $"사진 {image.FileName}" });
+            content.Add(new
+            {
+                type = "image",
+                source = new { type = "base64", media_type = image.MediaType, data = Convert.ToBase64String(image.Data) },
+            });
+        }
+        content.Add(new { type = "text", text = prompt });
+
+        var message = new { type = "user", message = new { role = "user", content } };
+        return JsonSerializer.Serialize(message) + "\n";
+    }
+
+    private static string LastResultLine(string stdout)
+    {
+        foreach (var line in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries).Reverse())
+        {
+            if (line.Contains("\"type\":\"result\"", StringComparison.Ordinal))
+                return line.Trim();
+        }
+        // result 줄이 없으면 그대로 넘겨 형식 오류로 판정되게 한다
+        return stdout;
     }
 
     private static string FindExecutable()
@@ -84,7 +130,7 @@ public sealed class ClaudeCli : IClaudeCli
             "Claude Code CLI를 찾지 못했습니다. 찾아본 경로:\n" + string.Join("\n", candidates));
     }
 
-    private static ProcessStartInfo BuildStartInfo(string exe, string systemPrompt, string jsonSchema)
+    private static ProcessStartInfo BuildStartInfo(string exe, string systemPrompt, string jsonSchema, bool streamJson)
     {
         var psi = new ProcessStartInfo(exe)
         {
@@ -103,7 +149,6 @@ public sealed class ClaudeCli : IClaudeCli
         string[] arguments =
         [
             "-p",
-            "--output-format", "json",
             "--json-schema", jsonSchema,
             "--system-prompt", systemPrompt,
             "--tools", "",
@@ -116,6 +161,13 @@ public sealed class ClaudeCli : IClaudeCli
             "--model", Model,
         ];
         foreach (var argument in arguments)
+            psi.ArgumentList.Add(argument);
+
+        // 그림을 넘길 때만 stream-json 입출력 (--verbose 는 stream-json 출력에 필요하다)
+        string[] format = streamJson
+            ? ["--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]
+            : ["--output-format", "json"];
+        foreach (var argument in format)
             psi.ArgumentList.Add(argument);
 
         foreach (var name in StrippedVariables)

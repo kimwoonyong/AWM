@@ -42,7 +42,42 @@
 
                 <TextBlock DockPanel.Dock="Top" Text="추가 요청 (선택)" Style="{StaticResource FieldLabel}" />
                 <TextBox DockPanel.Dock="Top" Text="{Binding Extra, UpdateSourceTrigger=PropertyChanged}" Padding="4"
-                         Height="110" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" />
+                         Height="80" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" />
+
+                <!-- 사진: 넣고 글쓰기(사진 먼저) / 쓴 글에 배치(글 먼저) -->
+                <DockPanel DockPanel.Dock="Top" Margin="0,12,0,4">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                        <Button Content="사진 추가" Command="{Binding AddPhotosCommand}" Padding="10,2" />
+                        <Button Content="사진 배치" Command="{Binding PlacePhotosCommand}" Padding="10,2" Margin="6,0,0,0"
+                                ToolTip="Claude 가 사진을 보고, 글은 그대로 둔 채 어울리는 문단 뒤에 사진 줄을 넣습니다" />
+                    </StackPanel>
+                    <TextBlock Text="{Binding PhotosHeader}" Foreground="#555555" VerticalAlignment="Center" />
+                </DockPanel>
+                <ListBox DockPanel.Dock="Top" ItemsSource="{Binding Photos}" MaxHeight="140" MinHeight="28"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled" HorizontalContentAlignment="Stretch">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate>
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Content="빼기" Command="{Binding RemoveCommand}" Padding="8,0" Margin="6,0,0,0" />
+                                <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" ToolTip="{Binding Label}" VerticalAlignment="Center">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="Foreground" Value="#333333" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsPlaced}" Value="False">
+                                                    <Setter Property="Foreground" Value="#B26A00" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsMissing}" Value="True">
+                                                    <Setter Property="Foreground" Value="#C62828" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </DockPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
 
                 <Grid DockPanel.Dock="Top" Margin="0,16,0,0">
                     <Grid.ColumnDefinitions>
@@ -55,7 +90,7 @@
                 </Grid>
 
                 <TextBlock DockPanel.Dock="Top" Margin="0,10,0,0" Foreground="#888888" TextWrapping="Wrap"
-                           Text="주제가 비어 있거나 만드는 중이면 「초안 만들기」는 눌리지 않습니다." />
+                           Text="사진을 넣고 「초안 만들기」를 누르면 Claude 가 사진을 보고 글을 씁니다. 이미 쓴 글에는 「사진 배치」." />
             </DockPanel>
         </Border>
 
@@ -71,21 +106,22 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <DockPanel Grid.Row="0">
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Button Content="네이버로 보내기" Command="{Binding SendToNaverCommand}" Padding="12,4"
-                            ToolTip="본문을 네이버용으로 복사하고 크롬으로 네이버 글쓰기를 엽니다" />
-                    <Button Content="네이버용 복사" Command="{Binding CopyForNaverCommand}" Padding="12,4" Margin="8,0,0,0"
-                            ToolTip="소제목·인용·목록·구분선을 살린 본문을 복사합니다" />
-                    <Button Content="불러오기" Command="{Binding OpenListCommand}" Padding="12,4" Margin="16,0,0,0" />
-                    <Button Content="저장" Command="{Binding SaveCommand}" Padding="16,4" Margin="8,0,0,0" />
-                </StackPanel>
-                <StackPanel VerticalAlignment="Center">
-                    <TextBlock Text="결과 — 직접 고칠 수 있습니다" FontWeight="SemiBold" FontSize="14" />
-                    <TextBlock Text="{Binding CurrentLabel}" Foreground="#666666" Margin="0,2,0,0"
-                               TextTrimming="CharacterEllipsis" ToolTip="{Binding CurrentLabel}" />
-                </StackPanel>
-            </DockPanel>
+            <!-- 제목 줄과 버튼 줄을 나눈다 — 한 줄에 두면 창이 좁을 때 버튼이 제목을 덮는다. 버튼은 모자라면 다음 줄로 -->
+            <StackPanel Grid.Row="0">
+                <TextBlock Text="결과 — 직접 고칠 수 있습니다" FontWeight="SemiBold" FontSize="14" />
+                <TextBlock Text="{Binding CurrentLabel}" Foreground="#666666" Margin="0,2,0,0"
+                           TextTrimming="CharacterEllipsis" ToolTip="{Binding CurrentLabel}" />
+                <WrapPanel Margin="0,4,0,0">
+                    <Button Content="네이버로 보내기" Command="{Binding SendToNaverCommand}" Padding="12,4" Margin="0,4,6,0"
+                            ToolTip="크롬으로 네이버 글쓰기를 열고 단축키 Ctrl+Alt+V 를 10분 동안 켭니다" />
+                    <Button Content="다시 붙이기" Command="{Binding RearmCommand}" Padding="10,4" Margin="0,4,6,0"
+                            ToolTip="크롬을 새로 열지 않고 단축키만 다시 켭니다 — 열어 둔 글쓰기 탭에서 다시 붙일 때" />
+                    <Button Content="네이버용 복사" Command="{Binding CopyForNaverCommand}" Padding="12,4" Margin="0,4,18,0"
+                            ToolTip="소제목·인용·목록·구분선을 살린 본문을 복사합니다(사진 제외)" />
+                    <Button Content="불러오기" Command="{Binding OpenListCommand}" Padding="12,4" Margin="0,4,6,0" />
+                    <Button Content="저장" Command="{Binding SaveCommand}" Padding="16,4" Margin="0,4,0,0" />
+                </WrapPanel>
+            </StackPanel>
 
             <DockPanel Grid.Row="1">
                 <Button DockPanel.Dock="Right" Content="복사" Command="{Binding CopyTitleCommand}" Style="{StaticResource CopyButton}" />
@@ -95,7 +131,8 @@
 
             <DockPanel Grid.Row="3">
                 <Button DockPanel.Dock="Right" Content="복사" Command="{Binding CopyBodyCommand}" Style="{StaticResource CopyButton}" />
-                <TextBlock Text="본문 (## 소제목 · &gt; 인용 · - 목록 · --- 구분선)" Style="{StaticResource FieldLabel}" />
+                <TextBlock Text="본문 (## 소제목 · &gt; 인용 · - 목록 · --- 구분선 · [사진: 설명 | 01.jpg])" Style="{StaticResource FieldLabel}"
+                           TextTrimming="CharacterEllipsis" />
             </DockPanel>
             <TextBox Grid.Row="4" Text="{Binding Body, UpdateSourceTrigger=PropertyChanged}" Padding="4"
                      AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" />

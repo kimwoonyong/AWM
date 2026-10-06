@@ -15,6 +15,11 @@ public partial class MainWindow : Window
         InitializeComponent();
         _viewModel = viewModel;
         DataContext = viewModel;
+
+        // 처음 크기는 모니터 작업 영역에 비례 — 노트북·큰 모니터 모두 알맞게 (사용자 결정 2026-10-06)
+        var work = SystemParameters.WorkArea;
+        Width = Math.Max(MinWidth, Math.Round(work.Width * 0.5));
+        Height = Math.Max(MinHeight, Math.Round(work.Height * 0.6));
     }
 
     protected override void OnClosing(CancelEventArgs e)

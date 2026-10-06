@@ -12,6 +12,7 @@ public sealed class DraftStore(string root) : IDraftStore
     private const string FileName = "draft.json";
     private const int MaxTitleLength = 40;
     private const string UntitledName = "제목 없음";
+    private const string ImagesFolder = "images";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -92,6 +93,65 @@ public sealed class DraftStore(string root) : IDraftStore
         if (!Directory.Exists(folder))
             throw new DraftFolderMissingException(folder);
         return new StoredDraft(folder, await ReadAsync(folder).ConfigureAwait(false));
+    }
+
+    public async Task<string> AddImageAsync(string folder, string sourcePath)
+    {
+        if (!Directory.Exists(folder))
+            throw new DraftFolderMissingException(folder);
+
+        var images = Directory.CreateDirectory(Path.Combine(folder, ImagesFolder)).FullName;
+        var extension = Path.GetExtension(sourcePath).ToLowerInvariant();
+        await using var source = new FileStream(sourcePath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+
+        for (var number = NextImageNumber(images); ; number++)
+        {
+            var name = $"{number:00}{extension}";
+            FileStream target;
+            try
+            {
+                // 같은 이름이 있으면 덮어쓰지 않고 다음 번호로
+                target = new FileStream(Path.Combine(images, name), FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true);
+            }
+            catch (IOException) when (File.Exists(Path.Combine(images, name)))
+            {
+                continue;
+            }
+
+            try
+            {
+                await using (target)
+                    await source.CopyToAsync(target).ConfigureAwait(false);
+                return name;
+            }
+            catch
+            {
+                TryDelete(Path.Combine(images, name));
+                throw;
+            }
+        }
+    }
+
+    public string? FindImage(string folder, string fileName)
+    {
+        // 사진 줄의 파일 이름은 사용자가 고칠 수 있다 — images\ 밖을 가리키지 못하게 이름만 받는다
+        if (fileName != Path.GetFileName(fileName) || fileName.Length == 0)
+            return null;
+        var path = Path.Combine(folder, ImagesFolder, fileName);
+        return File.Exists(path) ? path : null;
+    }
+
+    public Task<byte[]> ReadImageAsync(string path) => File.ReadAllBytesAsync(path);
+
+    private static int NextImageNumber(string imagesFolder)
+    {
+        var max = 0;
+        foreach (var file in Directory.EnumerateFiles(imagesFolder))
+        {
+            if (int.TryParse(Path.GetFileNameWithoutExtension(file), out var number) && number > max)
+                max = number;
+        }
+        return max + 1;
     }
 
     /// <summary>

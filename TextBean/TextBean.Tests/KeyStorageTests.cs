@@ -288,10 +288,10 @@ public class KeyStorageTests
         public int HeaderLength => inner.HeaderLength;
         public DocumentReadResult Decrypt(byte[] fileBytes)
             => inner.Decrypt(fileBytes) is { IsOk: true } ok ? ok with { Text = ok.Text + "?" } : inner.Decrypt(fileBytes);
-        public byte[] EncryptForNew(string plainText) => inner.EncryptForNew(plainText);
-        public byte[] EncryptReplacing(string plainText, ReadOnlySpan<byte> existingHeader, DocumentKeyBinding? binding)
-            => inner.EncryptReplacing(plainText, existingHeader, binding);
-        public byte[] EncryptFor(string plainText, DocumentKeyBinding binding) => inner.EncryptFor(plainText, binding);
+        public byte[] EncryptForNew(DocumentBody body) => inner.EncryptForNew(body);
+        public byte[] EncryptReplacing(DocumentBody body, ReadOnlySpan<byte> existingHeader, DocumentKeyBinding? binding)
+            => inner.EncryptReplacing(body, existingHeader, binding);
+        public byte[] EncryptFor(DocumentBody body, DocumentKeyBinding binding) => inner.EncryptFor(body, binding);
         public DocumentHeader ParseHeader(ReadOnlySpan<byte> bytes) => inner.ParseHeader(bytes);
         public DocumentKeyState Classify(DocumentHeader header) => inner.Classify(header);
     }

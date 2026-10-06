@@ -132,12 +132,7 @@
         <DataTrigger Binding="{Binding IsPlainTextFile}" Value="True">
           <Setter TargetName="Doc" Property="Source" Value="{StaticResource DocumentPlainIcon}" />
         </DataTrigger>
-        <DataTrigger Binding="{Binding IsPlainText}" Value="True">
-          <Setter TargetName="Doc" Property="Opacity" Value="1" />
-          <Setter TargetName="Doc" Property="Visibility" Value="Visible" />
-          <Setter TargetName="Warn" Property="Visibility" Value="Collapsed" />
-          <Setter TargetName="Dot" Property="Visibility" Value="Collapsed" />
-        </DataTrigger>
+        <!-- 평문도 고칠 수 있다 (D-117) — 저장 전 점 · 실패 ⚠ 를 금고 문서와 똑같이 보인다 -->
       </DataTemplate.Triggers>
     </DataTemplate>
 
@@ -168,21 +163,145 @@
         </Trigger>
       </Style.Triggers>
     </Style>
+
+    <!-- 서식 도구 모음 단추 (D-127). 포커스를 가져가지 않는다 — 본문의 선택이 남아 있어야 서식이 그 선택에 칠해진다. -->
+    <Style x:Key="FormatButton" TargetType="Button" BasedOn="{StaticResource {x:Static ToolBar.ButtonStyleKey}}">
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="MinWidth" Value="28" />
+      <Setter Property="Height" Value="26" />
+      <Setter Property="Padding" Value="6,0" />
+      <Setter Property="Margin" Value="0,0,2,0" />
+    </Style>
+    <Style x:Key="FormatToggle" TargetType="ToggleButton" BasedOn="{StaticResource {x:Static ToolBar.ToggleButtonStyleKey}}">
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Height" Value="26" />
+      <Setter Property="Padding" Value="6,0" />
+      <Setter Property="Margin" Value="0,0,2,0" />
+    </Style>
+    <Style x:Key="Swatch" TargetType="Button" BasedOn="{StaticResource {x:Static ToolBar.ButtonStyleKey}}">
+      <Setter Property="Focusable" Value="False" />
+      <Setter Property="Width" Value="26" />
+      <Setter Property="Height" Value="26" />
+      <Setter Property="Padding" Value="3" />
+    </Style>
+
+    <!-- .txt 본문 — 서식을 담지 못한다 (D-125). -->
+    <DataTemplate x:Key="PlainBodyTemplate">
+      <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}"
+               IsReadOnly="{Binding IsReadOnly}"
+               platform:EditorBehavior.InterceptCopy="True"
+               platform:SearchHighlightBehavior.ShowMatches="True"
+               AcceptsReturn="True" AcceptsTab="True"
+               VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
+               FontFamily="Cascadia Mono, Consolas, D2Coding" FontSize="13"
+               AllowDrop="False" Padding="10" BorderThickness="0" />
+    </DataTemplate>
+
+    <!-- .tbx 본문 — 서식 6종 (D-125 · D-127). 도구 모음과 본문을 한 템플릿에 둔다 — 단추의 CommandTarget 이 이름으로 본문을 찾는다. -->
+    <DataTemplate x:Key="RichBodyTemplate">
+      <DockPanel>
+        <Border DockPanel.Dock="Top" Padding="8,3" BorderThickness="0,0,0,1" BorderBrush="#E5E3DA" Background="#FAFAF7"
+                Visibility="{Binding ShowFormatBar, Converter={StaticResource BoolToVisibility}}">
+          <StackPanel Orientation="Horizontal">
+            <Button Style="{StaticResource FormatButton}" Command="EditingCommands.ToggleBold"
+                    CommandTarget="{Binding ElementName=Body}" ToolTip="굵게 (Ctrl+B)">
+              <TextBlock Text="가" FontWeight="Bold" />
+            </Button>
+            <Button Style="{StaticResource FormatButton}" Command="EditingCommands.ToggleItalic"
+                    CommandTarget="{Binding ElementName=Body}" ToolTip="기울임 (Ctrl+I)">
+              <TextBlock Text="가" FontStyle="Italic" />
+            </Button>
+            <Button Style="{StaticResource FormatButton}" Command="{x:Static platform:RichFormat.ToggleUnderline}"
+                    CommandTarget="{Binding ElementName=Body}" ToolTip="밑줄 (Ctrl+U)">
+              <TextBlock Text="가" TextDecorations="Underline" />
+            </Button>
+            <Button Style="{StaticResource FormatButton}" Command="{x:Static platform:RichFormat.ToggleStrikethrough}"
+                    CommandTarget="{Binding ElementName=Body}" ToolTip="취소선 (Ctrl+Shift+X)">
+              <TextBlock Text="가" TextDecorations="Strikethrough" />
+            </Button>
+            <Rectangle Width="1" Height="18" Margin="6,0" Fill="#D3D1C7" />
+
+            <ToggleButton x:Name="TextColorToggle" Style="{StaticResource FormatToggle}" ToolTip="글자색"
+                          IsChecked="{Binding IsOpen, ElementName=TextColorPopup}">
+              <StackPanel Orientation="Horizontal">
+                <Border BorderBrush="#E24B4A" BorderThickness="0,0,0,3"><TextBlock Text="가" /></Border>
+                <TextBlock Text=" ▾" Foreground="#5F5E5A" />
+              </StackPanel>
+            </ToggleButton>
+            <Popup x:Name="TextColorPopup" StaysOpen="False" PlacementTarget="{Binding ElementName=TextColorToggle}">
+              <Border Background="White" BorderBrush="#D3D1C7" BorderThickness="1" Padding="4">
+                <StackPanel Orientation="Horizontal" ButtonBase.Click="OnFormatPopupPick">
+                  <Button Style="{StaticResource Swatch}" Width="Auto" Padding="6,0" Content="기본"
+                          Command="{x:Static platform:RichFormat.SetForeground}" CommandParameter=""
+                          CommandTarget="{Binding ElementName=Body}" />
+                  <Button Style="{StaticResource Swatch}" ToolTip="빨강" Command="{x:Static platform:RichFormat.SetForeground}"
+                          CommandParameter="빨강" CommandTarget="{Binding ElementName=Body}"><Rectangle Width="18" Height="18" Fill="#E24B4A" Stroke="#B4B2A9" StrokeThickness="0.5" /></Button>
+                  <Button Style="{StaticResource Swatch}" ToolTip="주황" Command="{x:Static platform:RichFormat.SetForeground}"
+                          CommandParameter="주황" CommandTarget="{Binding ElementName=Body}"><Rectangle Width="18" Height="18" Fill="#D85A30" Stroke="#B4B2A9" StrokeThickness="0.5" /></Button>
+                  <Button Style="{StaticResource Swatch}" ToolTip="초록" Command="{x:Static platform:RichFormat.SetForeground}"
+                          CommandParameter="초록" CommandTarget="{Binding ElementName=Body}"><Rectangle Width="18" Height="18" Fill="#3B6D11" Stroke="#B4B2A9" StrokeThickness="0.5" /></Button>
+                  <Button Style="{StaticResource Swatch}" ToolTip="파랑" Command="{x:Static platform:RichFormat.SetForeground}"
+                          CommandParameter="파랑" CommandTarget="{Binding ElementName=Body}"><Rectangle Width="18" Height="18" Fill="#185FA5" Stroke="#B4B2A9" StrokeThickness="0.5" /></Button>
+                  <Button Style="{StaticResource Swatch}" ToolTip="보라" Command="{x:Static platform:RichFormat.SetForeground}"
+                          CommandParameter="보라" CommandTarget="{Binding ElementName=Body}"><Rectangle Width="18" Height="18" Fill="#534AB7" Stroke="#B4B2A9" StrokeThickness="0.5" /></Button>
+                  <Button Style="{StaticResource Swatch}" ToolTip="회색" Command="{x:Static platform:RichFormat.SetForeground}"
+                          CommandParameter="회색" CommandTarget="{Binding ElementName=Body}"><Rectangle Width="18" Height="18" Fill="#888780" Stroke="#B4B2A9" StrokeThickness="0.5" /></Button>
+                </StackPanel>
+              </Border>
+            </Popup>
+
+            <ToggleButton x:Name="HighlightToggle" Style="{StaticResource FormatToggle}" ToolTip="형광펜"
+                          IsChecked="{Binding IsOpen, ElementName=HighlightPopup}">
+              <StackPanel Orientation="Horizontal">
+                <Border Background="#FAC775" Padding="3,0"><TextBlock Text="형광펜" Foreground="#412402" /></Border>
+                <TextBlock Text=" ▾" Foreground="#5F5E5A" />
+              </StackPanel>
+            </ToggleButton>
+            <Popup x:Name="HighlightPopup" StaysOpen="False" PlacementTarget="{Binding ElementName=HighlightToggle}">
+              <Border Background="White" BorderBrush="#D3D1C7" BorderThickness="1" Padding="4">
+                <StackPanel Orientation="Horizontal" ButtonBase.Click="OnFormatPopupPick">
+                  <Button Style="{StaticResource Swatch}" Width="Auto" Padding="6,0" Content="없음"
+                          Command="{x:Static platform:RichFormat.SetHighlight}" CommandParameter=""
+                          CommandTarget="{Binding ElementName=Body}" />
+                  <Button Style="{StaticResource Swatch}" ToolTip="노랑" Command="{x:Static platform:RichFormat.SetHighlight}"
+                          CommandParameter="노랑" CommandTarget="{Binding ElementName=Body}"><Rectangle Width="18" Height="18" Fill="#FAC775" Stroke="#B4B2A9" StrokeThickness="0.5" /></Button>
+                  <Button Style="{StaticResource Swatch}" ToolTip="연두" Command="{x:Static platform:RichFormat.SetHighlight}"
+                          CommandParameter="연두" CommandTarget="{Binding ElementName=Body}"><Rectangle Width="18" Height="18" Fill="#C0DD97" Stroke="#B4B2A9" StrokeThickness="0.5" /></Button>
+                  <Button Style="{StaticResource Swatch}" ToolTip="하늘" Command="{x:Static platform:RichFormat.SetHighlight}"
+                          CommandParameter="하늘" CommandTarget="{Binding ElementName=Body}"><Rectangle Width="18" Height="18" Fill="#B5D4F4" Stroke="#B4B2A9" StrokeThickness="0.5" /></Button>
+                  <Button Style="{StaticResource Swatch}" ToolTip="분홍" Command="{x:Static platform:RichFormat.SetHighlight}"
+                          CommandParameter="분홍" CommandTarget="{Binding ElementName=Body}"><Rectangle Width="18" Height="18" Fill="#F4C0D1" Stroke="#B4B2A9" StrokeThickness="0.5" /></Button>
+                </StackPanel>
+              </Border>
+            </Popup>
+            <Rectangle Width="1" Height="18" Margin="6,0" Fill="#D3D1C7" />
+
+            <Button Style="{StaticResource FormatButton}" Content="서식 지우기"
+                    Command="{x:Static platform:RichFormat.ClearFormatting}" CommandTarget="{Binding ElementName=Body}" />
+          </StackPanel>
+        </Border>
+        <RichTextBox x:Name="Body"
+                     IsReadOnly="{Binding IsReadOnly}"
+                     platform:RichBodyBehavior.Attach="True"
+                     platform:EditorBehavior.InterceptCopy="True"
+                     platform:SearchHighlightBehavior.ShowMatches="True"
+                     AcceptsReturn="True" AcceptsTab="True"
+                     VerticalScrollBarVisibility="Auto"
+                     FontFamily="Cascadia Mono, Consolas, D2Coding" FontSize="13"
+                     AllowDrop="False" Padding="10" BorderThickness="0">
+          <RichTextBox.Resources>
+            <!-- FlowDocument 문단은 기본으로 위아래 여백이 한 줄씩 있다 — TextBox 와 같은 줄 간격으로 맞춘다 -->
+            <Style TargetType="Paragraph">
+              <Setter Property="Margin" Value="0" />
+            </Style>
+          </RichTextBox.Resources>
+        </RichTextBox>
+      </DockPanel>
+    </DataTemplate>
   </Window.Resources>
 
-  <Window.InputBindings>
-    <KeyBinding Key="S" Modifiers="Ctrl" Command="{Binding SaveCommand}" />
-    <KeyBinding Key="W" Modifiers="Ctrl" Command="{Binding CloseActiveTabCommand}" />
-    <!-- 본문 TextBox 는 F / F3 / Esc 를 쓰지 않아 창까지 온다 [실측] -->
-    <KeyBinding Key="F" Modifiers="Ctrl" Command="{Binding OpenFindBarCommand}" />
-    <KeyBinding Key="F" Modifiers="Ctrl+Shift" Command="{Binding OpenSearchWindowCommand}" />
-    <KeyBinding Key="F3" Command="{Binding FindNextCommand}" />
-    <KeyBinding Key="F3" Modifiers="Shift" Command="{Binding FindPrevCommand}" />
-    <KeyBinding Key="Escape" Command="{Binding CloseFindBarCommand}" />
-    <KeyBinding Key="F5" Command="{Binding RefreshCommand}" />
-    <!-- ✕ 는 트레이로 숨긴다(D-092). 진짜 종료는 이것 · 도구 모음 「종료」 · 트레이 메뉴 -->
-    <KeyBinding Key="Q" Modifiers="Ctrl" Command="{Binding ExitCommand}" />
-  </Window.InputBindings>
+  <!-- 창 단축키는 코드가 셸의 키 표로 만든다 — 사용자가 바꿀 수 있다 (D-110, MainWindow.ApplyShortcuts).
+       본문 TextBox 가 먼저 쓰는 키는 고를 수 없다 (D-112) -->
 
   <DockPanel>
     <ToolBar DockPanel.Dock="Top">
@@ -203,8 +322,8 @@
       <Button Content="{Binding ChangeKeyLabel}" Command="{Binding ChangeKeyCommand}" />
       <Button Content="잠그기"  Command="{Binding LockCommand}" />
       <Separator />
-      <Button Content="종료" Command="{Binding ExitCommand}"
-              ToolTip="종료 (Ctrl+Q) — 열린 문서를 저장하고 끕니다. 키도 지워집니다" />
+      <Button Content="단축키" Command="{Binding OpenShortcutsCommand}" ToolTip="{Binding ShortcutsToolTip}" />
+      <Button Content="종료" Command="{Binding ExitCommand}" ToolTip="{Binding ExitToolTip}" />
     </ToolBar>
 
     <StatusBar DockPanel.Dock="Bottom">
@@ -442,17 +561,17 @@
                        VerticalAlignment="Center" Foreground="Gray" MinWidth="52"
                        TextAlignment="Right" />
             <Button DockPanel.Dock="Right" Content="✕" Padding="6,0" BorderThickness="0"
-                    Background="Transparent" Foreground="Gray" ToolTip="닫기 (Esc)"
+                    Background="Transparent" Foreground="Gray" ToolTip="{Binding DataContext.CloseFindBarToolTip, RelativeSource={RelativeSource AncestorType=Window}}"
                     Command="{Binding DataContext.CloseFindBarCommand,
                               RelativeSource={RelativeSource AncestorType=Window}}" />
             <CheckBox DockPanel.Dock="Right" Content="Aa" Margin="10,0,0,0" VerticalAlignment="Center"
                       ToolTip="대소문자 구분" IsChecked="{Binding MatchCase}" />
             <Button DockPanel.Dock="Right" Content="▼" Padding="6,0" BorderThickness="0"
-                    Background="Transparent" ToolTip="다음 (Enter · F3)"
+                    Background="Transparent" ToolTip="{Binding DataContext.FindNextToolTip, RelativeSource={RelativeSource AncestorType=Window}}"
                     Command="{Binding DataContext.FindNextCommand,
                               RelativeSource={RelativeSource AncestorType=Window}}" />
             <Button DockPanel.Dock="Right" Content="▲" Padding="6,0" BorderThickness="0"
-                    Background="Transparent" ToolTip="이전 (Shift+Enter · Shift+F3)"
+                    Background="Transparent" ToolTip="{Binding DataContext.FindPrevToolTip, RelativeSource={RelativeSource AncestorType=Window}}"
                     Command="{Binding DataContext.FindPrevCommand,
                               RelativeSource={RelativeSource AncestorType=Window}}" />
             <TextBox x:Name="FindBox"
@@ -521,14 +640,19 @@
                       </TextBlock.Style>
                     </TextBlock>
                   </Border>
-                  <TextBox Text="{Binding Text, UpdateSourceTrigger=PropertyChanged}"
-                           IsReadOnly="{Binding IsReadOnly}"
-                           platform:EditorBehavior.InterceptCopy="True"
-                           platform:SearchHighlightBehavior.ShowMatches="True"
-                           AcceptsReturn="True" AcceptsTab="True"
-                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"
-                           FontFamily="Cascadia Mono, Consolas, D2Coding" FontSize="13"
-                           AllowDrop="False" Padding="10" BorderThickness="0" />
+                  <!-- 본문: .txt 는 TextBox, .tbx 는 서식 본문 (D-125). 확장자는 이름 변경으로 바뀌지 않는다(D-018). -->
+                  <ContentControl Content="{Binding}" Focusable="False" IsTabStop="False">
+                    <ContentControl.Style>
+                      <Style TargetType="ContentControl">
+                        <Setter Property="ContentTemplate" Value="{StaticResource RichBodyTemplate}" />
+                        <Style.Triggers>
+                          <DataTrigger Binding="{Binding IsPlainTextFile}" Value="True">
+                            <Setter Property="ContentTemplate" Value="{StaticResource PlainBodyTemplate}" />
+                          </DataTrigger>
+                        </Style.Triggers>
+                      </Style>
+                    </ContentControl.Style>
+                  </ContentControl>
                 </DockPanel>
               </DataTemplate>
             </ItemsControl.ItemTemplate>

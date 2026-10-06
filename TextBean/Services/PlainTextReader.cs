@@ -43,9 +43,76 @@ public static class PlainTextReader
         // 깨진 채로 보여주면 사용자는 앱이 아니라 자기 파일이 깨졌다고 읽는다.
         if (Array.IndexOf(bytes, (byte)0) >= 0) return Undecodable;
 
-        return TryDecode(StrictUtf8, bytes, "UTF-8", isGuess: true)
-               ?? TryDecode(StrictCp949(), bytes, "CP949", isGuess: true)
+        return TryDecode(StrictUtf8, bytes, "UTF-8", isGuess: true, "UTF-8", hasBom: false)
+               ?? TryDecode(StrictCp949(), bytes, "CP949", isGuess: true, "CP949", hasBom: false)
                ?? Undecodable;
+    }
+
+    /// <summary>
+    /// 읽은 형식 그대로 다시 쓴다 (D-118) — 인코딩 · BOM · 줄바꿈. 줄바꿈은 파일이 쓰던 하나로 맞춘다
+    /// (Enter 는 CRLF 를 넣는다). 담을 수 없는 글자가 있으면 PlainTextEncodeException — 인코딩을 바꾸지 않는다 (D-119).
+    /// CP949 는 읽었다 다시 쓰면 바이트가 같다 [실측 — 0x80 · 0xFF 단독 포함].
+    /// </summary>
+    public static byte[] Encode(string text, PlainTextFormat format)
+    {
+        var normalized = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        if (format.NewLine == "\r\n") normalized = normalized.Replace("\n", "\r\n");
+
+        var encoding = StrictEncoder(format.Encoding)
+                       ?? throw new InvalidOperationException($"{format.Encoding} 로 쓸 수 없습니다.");
+        byte[] body;
+        try
+        {
+            body = encoding.GetBytes(normalized);
+        }
+        catch (EncoderFallbackException)
+        {
+            throw new PlainTextEncodeException(FirstUnencodableLine(normalized, encoding), format.Encoding);
+        }
+
+        if (!format.HasBom) return body;
+        byte[] bom = format.Encoding switch
+        {
+            "UTF-8" => [0xEF, 0xBB, 0xBF],
+            "UTF-16LE" => [0xFF, 0xFE],
+            "UTF-16BE" => [0xFE, 0xFF],
+            _ => []
+        };
+        return [.. bom, .. body];
+    }
+
+    private static Encoding? StrictEncoder(string name) => name switch
+    {
+        "UTF-8" => StrictUtf8,
+        "UTF-16LE" => new UnicodeEncoding(bigEndian: false, byteOrderMark: false, throwOnInvalidBytes: true),
+        "UTF-16BE" => new UnicodeEncoding(bigEndian: true, byteOrderMark: false, throwOnInvalidBytes: true),
+        "CP949" => StrictCp949(),
+        _ => null
+    };
+
+    private static int FirstUnencodableLine(string text, Encoding encoding)
+    {
+        var lines = text.Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            try { encoding.GetBytes(lines[i]); }
+            catch (EncoderFallbackException) { return i + 1; }
+        }
+        return 1;
+    }
+
+    /// 파일에서 많이 쓴 줄바꿈. 줄바꿈이 없으면 Windows 기본(CRLF).
+    private static string DominantNewLine(string text)
+    {
+        var crlf = 0;
+        var lf = 0;
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (text[i] != '\n') continue;
+            if (i > 0 && text[i - 1] == '\r') crlf++;
+            else lf++;
+        }
+        return lf > crlf ? "\n" : "\r\n";
     }
 
     private static DocumentReadResult Undecodable => DocumentReadResult.Fail(DocumentReadStatus.UndecodableText);
@@ -60,19 +127,19 @@ public static class PlainTextReader
         // BOM 은 디코딩 후 문자열에 U+FEFF 로 남는다. 길이만큼 건너뛰지 않으면 본문 맨 앞에
         // 보이지 않는 문자가 생겨 검색 강조 사각형이 한 칸씩 밀린다.
         if (StartsWith(bytes, [0xEF, 0xBB, 0xBF]))
-            return TryDecode(StrictUtf8, bytes, "UTF-8 (BOM)", isGuess: false, offset: 3) ?? Undecodable;
+            return TryDecode(StrictUtf8, bytes, "UTF-8 (BOM)", isGuess: false, "UTF-8", hasBom: true, offset: 3) ?? Undecodable;
 
-        if (StartsWith(bytes, [0xFF, 0xFE])) return DecodeUtf16(bytes, Encoding.Unicode, "UTF-16 LE (BOM)");
-        if (StartsWith(bytes, [0xFE, 0xFF])) return DecodeUtf16(bytes, Encoding.BigEndianUnicode, "UTF-16 BE (BOM)");
+        if (StartsWith(bytes, [0xFF, 0xFE])) return DecodeUtf16(bytes, Encoding.Unicode, "UTF-16 LE (BOM)", "UTF-16LE");
+        if (StartsWith(bytes, [0xFE, 0xFF])) return DecodeUtf16(bytes, Encoding.BigEndianUnicode, "UTF-16 BE (BOM)", "UTF-16BE");
 
         return null;
     }
 
-    private static DocumentReadResult DecodeUtf16(byte[] bytes, Encoding encoding, string label)
+    private static DocumentReadResult DecodeUtf16(byte[] bytes, Encoding encoding, string label, string name)
         // 홀수 길이면 마지막 코드 단위가 잘려 있다. 그냥 디코딩하면 끝 한 글자가 조용히 사라진다.
         => (bytes.Length - 2) % 2 != 0
             ? Undecodable
-            : TryDecode(encoding, bytes, label, isGuess: false, offset: 2) ?? Undecodable;
+            : TryDecode(encoding, bytes, label, isGuess: false, name, hasBom: true, offset: 2) ?? Undecodable;
 
     /// <summary>
     /// 엄격 CP949. 완벽한 관문은 아니다 — 0xFF·0x80 단독은 예외 없이 통과한다 [실측].
@@ -94,13 +161,15 @@ public static class PlainTextReader
         }
     }
 
-    private static DocumentReadResult? TryDecode(Encoding? encoding, byte[] bytes, string label, bool isGuess, int offset = 0)
+    private static DocumentReadResult? TryDecode(Encoding? encoding, byte[] bytes, string label, bool isGuess,
+                                                 string name, bool hasBom, int offset = 0)
     {
         if (encoding is null) return null;
 
         try
         {
-            return DocumentReadResult.PlainText(encoding.GetString(bytes, offset, bytes.Length - offset), label, isGuess);
+            var text = encoding.GetString(bytes, offset, bytes.Length - offset);
+            return DocumentReadResult.PlainText(text, label, isGuess, new PlainTextFormat(name, hasBom, DominantNewLine(text)));
         }
         catch (DecoderFallbackException)
         {

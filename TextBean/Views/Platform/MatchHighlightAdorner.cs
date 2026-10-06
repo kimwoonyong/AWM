@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using System.Windows.Media;
 using TextBean.ViewModels;
@@ -16,8 +17,26 @@ namespace TextBean.Views.Platform;
 /// ControlTemplate 을 다시 쓰지 않는다 — ContentPresenter 를 빠뜨리면 본문이 통째로
 /// 비고 빌드는 그대로 통과한다 (LL-014). Adorner 는 본문 XAML 을 한 줄도 안 건드린다.
 /// </summary>
-public sealed class MatchHighlightAdorner(TextBox box) : Adorner(box)
+public sealed class MatchHighlightAdorner(TextBoxBase box) : Adorner(box)
 {
+    /// <summary>
+    /// 본문 글자 길이 · 글자 위치의 캐럿 사각형(본문 기준 좌표). 서식 본문은 RichTextMap 으로 위치를 찾는다 (D-128) —
+    /// 편집기의 일치 위치가 그 대응표의 글자에서 나왔으므로 둘은 같은 글자를 센다.
+    /// </summary>
+    public static int LengthOf(TextBoxBase body) => body switch
+    {
+        TextBox plain => plain.Text.Length,
+        RichTextBox rich => RichBodyBehavior.GetMap(rich)?.Text.Length ?? 0,
+        _ => 0
+    };
+
+    public static Rect RectAt(TextBoxBase body, int index) => body switch
+    {
+        TextBox plain => plain.GetRectFromCharacterIndex(index),
+        RichTextBox rich => RichBodyBehavior.GetMap(rich)?.PointerAt(index)?.GetCharacterRect(LogicalDirection.Forward) ?? Rect.Empty,
+        _ => Rect.Empty
+    };
+
     private static readonly Brush Fill = Frozen(Color.FromArgb(0x66, 0xEF, 0x9F, 0x27));
     private static readonly Brush CurrentFill = Frozen(Color.FromArgb(0x99, 0x1D, 0x9E, 0x75));
 
@@ -44,12 +63,12 @@ public sealed class MatchHighlightAdorner(TextBox box) : Adorner(box)
         {
             var start = vm.Matches[i];
             var end = start + vm.MatchLength;
-            if (end > box.Text.Length) continue;          // 본문이 줄어든 직후
+            if (end > LengthOf(box)) continue;          // 본문이 줄어든 직후
 
             // 좌표는 뷰포트 기준이고 Rect 의 폭은 항상 0(캐럿 사각형)이라
             // 시작·끝 두 번 불러 그 차이로 폭을 만든다 [실측].
-            var from = box.GetRectFromCharacterIndex(start);
-            var to = box.GetRectFromCharacterIndex(end);
+            var from = RectAt(box, start);
+            var to = RectAt(box, end);
             if (from.IsEmpty || to.IsEmpty) continue;
 
             // 줄이 바뀌면 끝 좌표가 다음 줄로 내려간다. 그 경우는 줄 끝까지만 칠한다.

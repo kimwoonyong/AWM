@@ -131,6 +131,22 @@ internal sealed class TabScene : IDisposable
 
     public EditorViewModel Tab(int index) => Shell.Tabs[index];
 
+    /// <summary>
+    /// 그 탭의 서식 본문(RichTextBox)에 사용자가 친 것처럼 본문을 바꾼다 (D-125).
+    /// 화면이 붙은 .tbx 탭의 저장은 본문에서 뽑으므로, 편집기 Text 에 직접 넣으면 저장되지 않는다.
+    /// 본문은 한 번 그려진 탭에만 있다 — 그 탭을 잠깐 활성으로 두고 배치한다(숨긴 창에서도 배치된다).
+    /// </summary>
+    public void TypeInto(int index, string text)
+    {
+        var previous = Shell.ActiveTab;
+        Shell.ActiveTab = Tab(index);
+        Window.UpdateLayout();
+        var body = Assert.IsType<RichTextBox>(Window.FindActiveBodyTextBox());
+        new TextRange(body.Document.ContentStart, body.Document.ContentEnd).Text = text;
+        Shell.ActiveTab = previous;
+        Window.UpdateLayout();
+    }
+
     /// 실제 화면에서는 시험 호스트가 가짜 대화상자·클립보드를 쓰는지 확인할 길이 셸뿐이다.
     /// MessageBox · 폴더 창은 어떤 걸쇠에도 걸리지 않는다 [실측 — 계획 검토].
     private static void AssertFakes(ShellViewModel shell)
@@ -699,10 +715,10 @@ public class TabStripTests
     [InlineData(SaveState.Saving, false, false, "locked+dot")]
     [InlineData(SaveState.Failed, false, false, "warn")]
     [InlineData(SaveState.ReadOnly, false, false, "locked+dim")]     // 다른 키 · 열었을 때 — 트리의 "지금 키로 안 열림"과 같은 흐림
-    [InlineData(SaveState.ReadOnly, true, true, "plain")]            // 평문은 읽기 전용이어도 트리의 평문 그림 그대로 (D-025)
+    [InlineData(SaveState.Saved, true, true, "plain")]               // 평문도 고칠 수 있다 (D-117) — 상태는 금고 문서와 같이 얹는다
     [InlineData(SaveState.ReadOnly, false, true, "plain+dim")]       // 읽지 못한 .txt — 트리처럼 평문 그림, 열리지 않았으니 흐림
-    [InlineData(SaveState.Failed, true, true, "plain")]
-    [InlineData(SaveState.Saving, true, true, "plain")]
+    [InlineData(SaveState.Failed, true, true, "warn")]
+    [InlineData(SaveState.Saving, true, true, "plain+dot")]
     public void 상태_아이콘은_트리_그림에_상태를_얹고_칸_크기는_같다(SaveState state, bool plain, bool plainFile, string expected) => Run(() =>
     {
         var window = new MainWindow();
@@ -809,7 +825,7 @@ public class TabStripTests
     public void 목록에서_고르면_그_탭으로_가고_그_본문에_포커스를_준다() => Run(() =>
     {
         using var scene = TabScene.Open(15);
-        TextBox? focused = null;
+        System.Windows.Controls.Primitives.TextBoxBase? focused = null;
         scene.Window.FocusBody = textBox => focused = textBox;      // 실제 포커스는 잡지 않는다 (D-082)
 
         var entries = scene.Shell.TabListEntries();
@@ -833,7 +849,7 @@ public class TabStripTests
     public void 목록을_연_뒤_닫힌_탭을_고르면_아무_일도_없다() => Run(() =>
     {
         using var scene = TabScene.Open(6);
-        TextBox? focused = null;
+        System.Windows.Controls.Primitives.TextBoxBase? focused = null;
         scene.Window.FocusBody = textBox => focused = textBox;
         var active = scene.Shell.ActiveTab;
         var entries = scene.Shell.TabListEntries();

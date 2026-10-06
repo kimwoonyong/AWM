@@ -29,8 +29,8 @@ public class PlainTextRenameTests
     }
 
     /// <summary>
-    /// 대화상자 초기값이 확장자를 뗀 이름이라, 사용자가 아무것도 고치지 않고 확인만 누르면
-    /// 원래 이름 그대로가 들어온다. 그때도 확장자가 바뀌면 안 된다 — 이것이 실제 파괴 경로였다.
+    /// 확장자 없이 원래 이름이 들어와도 확장자가 바뀌면 안 된다 — .tbx 를 붙이던 예전 코드의 실제 파괴 경로였다.
+    /// (평문의 실제 처음 값은 확장자가 붙은 「메모.txt」다 — 아래 D-122 시험이 본다.)
     /// </summary>
     [Fact]
     public void 이름을_안_고치고_확인만_눌러도_평문이_살아남는다()
@@ -110,5 +110,73 @@ public class PlainTextRenameTests
 
         service.MoveToTrash(moved, Stamp);
         Assert.True(File.Exists(Path.Combine(vault.Root, ".trash", Stamp, @"폴더1\메모.txt")));
+    }
+
+    // ── 확장자를 쳐 넣은 이름 (D-122) ────────────────────────────────────────
+    // 트리는 평문 이름에 확장자를 드러낸다(「메모.txt」) — 이름 변경 창의 처음 값도 그것이다.
+
+    [Theory]
+    [InlineData("메모.txt", "메모.txt")]          // 처음 값 그대로 확인 — 이름이 그대로다
+    [InlineData("메모2.txt", "메모2.txt")]
+    [InlineData("메모2.TXT", "메모2.txt")]        // 대소문자를 가리지 않는다. 원래 확장자가 남는다
+    [InlineData("메모2", "메모2.txt")]
+    [InlineData("메모2.tbx", "메모2.tbx.txt")]    // 다른 확장자는 이름 일부일 뿐 — 종류는 바뀌지 않는다 (D-018)
+    public void 평문_이름에_확장자를_쳐_넣어도_두_번_붙지_않는다(string input, string expected)
+    {
+        using var vault = new TempVault();
+        var doc = vault.WriteRaw("메모.txt", Plain);
+
+        var renamed = new TreeService(vault.Root).Rename(doc, input);
+
+        Assert.Equal(Path.Combine(vault.Root, expected), renamed);
+        Assert.Equal(Plain, File.ReadAllBytes(renamed));
+    }
+
+    [Fact]
+    public void 금고_문서도_확장자를_쳐_넣으면_두_번_붙지_않는다()
+    {
+        using var vault = new TempVault();
+        var doc = vault.WriteRaw("문서.tbx", FakeDoc);
+
+        var renamed = new TreeService(vault.Root).Rename(doc, "문서2.tbx");
+
+        Assert.Equal(Path.Combine(vault.Root, "문서2.tbx"), renamed);
+    }
+
+    /// 실제 사용자 길 — 트리에서 고르고, 창의 처음 값을 고치지 않고 확인한다
+    [Fact]
+    public async Task 처음_값_그대로_확인하면_평문_이름이_그대로다()
+    {
+        using var vault = new TempVault();
+        var doc = vault.WriteRaw("메모.txt", Plain);
+        var (shell, dlg, _) = await ShellFixture.BuildAsync(vault);
+        await shell.RefreshAsync();
+        shell.Selected = ShellFixture.FindNode(shell.Roots, "메모.txt");
+
+        shell.RenameCommand.Execute(null);                 // FakeDialogs 는 처음 값을 그대로 돌려준다
+        await ShellFixture.Settle(shell);
+
+        Assert.True(File.Exists(doc));
+        Assert.False(File.Exists(doc + ".txt"));
+        Assert.Equal(0, dlg.ErrorCount);
+        shell.Dispose();
+    }
+
+    [Fact]
+    public async Task 확장자만_쓴_이름은_비었다고_막는다()
+    {
+        using var vault = new TempVault();
+        var doc = vault.WriteRaw("메모.txt", Plain);
+        var (shell, dlg, _) = await ShellFixture.BuildAsync(vault);
+        await shell.RefreshAsync();
+        shell.Selected = ShellFixture.FindNode(shell.Roots, "메모.txt");
+        dlg.PromptTextResult = ".txt";
+
+        shell.RenameCommand.Execute(null);
+        await ShellFixture.Settle(shell);
+
+        Assert.True(File.Exists(doc));
+        Assert.Equal("이름 오류", dlg.LastErrorTitle);
+        shell.Dispose();
     }
 }

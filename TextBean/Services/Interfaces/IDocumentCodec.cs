@@ -14,16 +14,16 @@ public interface IDocumentCodec
     DocumentReadResult Decrypt(byte[] fileBytes);
 
     /// 새 문서. 지금 세대의 새 문서용 키로 잠근다.
-    byte[] EncryptForNew(string plainText);
+    byte[] EncryptForNew(DocumentBody body);
 
     /// <summary>
     /// 디스크에 있는 파일을 덮어쓴다. 그 파일을 잠근 키로만 — 헤더의 KDF 종류 · 반복 횟수 · salt · 키 확인값이
     /// 지금 세대(결속이 있으면 그 세대)의 키와 모두 맞아야 한다. 아니면 <see cref="Services.KeyUnavailableException"/>.
     /// </summary>
-    byte[] EncryptReplacing(string plainText, ReadOnlySpan<byte> existingHeader, DocumentKeyBinding? binding);
+    byte[] EncryptReplacing(DocumentBody body, ReadOnlySpan<byte> existingHeader, DocumentKeyBinding? binding);
 
     /// 결속의 키로 잠근다. 파일이 밖에서 없어진 뒤의 저장 — 지금 키로 새로 만들면 다른 키로 되살아난다.
-    byte[] EncryptFor(string plainText, DocumentKeyBinding binding);
+    byte[] EncryptFor(DocumentBody body, DocumentKeyBinding binding);
 
     /// 복호하지 않고 헤더만 판정한다.
     DocumentHeader ParseHeader(ReadOnlySpan<byte> bytes);

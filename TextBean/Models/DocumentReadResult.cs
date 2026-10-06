@@ -16,7 +16,7 @@ public enum DocumentReadStatus
     /// "다른 키"와 합치면 사용자가 손상된 문서를 키 탓으로 알고 되돌릴 지점을 찾지 않는다.
     Corrupted,
 
-    /// 옛 방식(Windows 계정, TBX1 버전 1) 문서. 이 버전은 열지도 덮어쓰지도 않는다 (D-073).
+    /// 옛 형식 문서 — TBX1 버전 1(Windows 계정) · 2(서식 이전). 열지도 덮어쓰지도 않는다 (D-073 · D-124).
     LegacyDpapi,
 
     ReadFailed,
@@ -41,7 +41,9 @@ public sealed record DocumentReadResult(
     DocumentKind Kind = DocumentKind.Encrypted,
     string? EncodingLabel = null,
     bool EncodingIsGuess = false,
-    DocumentKeyBinding? Binding = null)
+    DocumentKeyBinding? Binding = null,
+    PlainTextFormat? PlainFormat = null,
+    byte[]? Rich = null)
 {
     /// <summary>
     /// "읽기에 성공했다"만 뜻한다. "쓸 수 있다"는 Kind 가 정한다.
@@ -52,17 +54,17 @@ public sealed record DocumentReadResult(
     public static DocumentReadResult Success(string text) => new(DocumentReadStatus.Ok, text, null);
 
     /// 금고 문서를 읽었다. 어느 세대의 어느 키로 열었는지를 싣는다 — 저장이 그 키로만 쓰게 한다.
-    public static DocumentReadResult Success(string text, DocumentKeyBinding binding)
-        => new(DocumentReadStatus.Ok, text, null, Binding: binding);
+    /// Text 는 검색용 글자, Rich 는 서식 문서다 (D-123).
+    public static DocumentReadResult Success(DocumentBody body, DocumentKeyBinding binding)
+        => new(DocumentReadStatus.Ok, body.Text, null, Binding: binding, Rich: body.Rich);
 
     /// <summary>
-    /// 평문 파일을 읽었다. 읽기는 성공이지만 쓰기는 열리지 않는다.
-    /// 무엇으로 읽었는지(EncodingLabel)와 그것이 확정인지 추정인지(EncodingIsGuess)를 함께 싣는다 —
+    /// 평문 파일을 읽었다. 무엇으로 읽었는지(EncodingLabel)와 그것이 확정인지 추정인지(EncodingIsGuess)를 함께 싣는다 —
     /// 인코딩을 잘못 골라도 예외가 나지 않고 깨진 글자가 조용히 그려지기 때문에,
-    /// 화면 표시가 사용자의 유일한 방어 수단이다.
+    /// 화면 표시가 사용자의 유일한 방어 수단이다. 저장은 PlainFormat 그대로 다시 쓴다 (D-118).
     /// </summary>
-    public static DocumentReadResult PlainText(string text, string encodingLabel, bool isGuess)
-        => new(DocumentReadStatus.Ok, text, null, DocumentKind.PlainText, encodingLabel, isGuess);
+    public static DocumentReadResult PlainText(string text, string encodingLabel, bool isGuess, PlainTextFormat format)
+        => new(DocumentReadStatus.Ok, text, null, DocumentKind.PlainText, encodingLabel, isGuess, PlainFormat: format);
 
     public static DocumentReadResult Fail(DocumentReadStatus status, string? detail = null) => new(status, null, detail);
 
@@ -85,7 +87,7 @@ public sealed record DocumentReadResult(
             "문서가 손상돼 열 수 없습니다. '열었을 때 상태 보기'로 이 문서를 열었을 때의 상태를 확인해보세요.",
 
         DocumentReadStatus.LegacyDpapi =>
-            "옛 방식(Windows 계정)으로 잠긴 문서라 이 버전에서는 열 수 없습니다. 보관해 둔 옛 버전 TextBean 으로 여세요.",
+            "옛 형식으로 만든 문서라 이 버전에서는 열 수 없습니다. 보관해 둔 옛 버전 TextBean 으로 여세요.",
 
         DocumentReadStatus.UndecodableText =>
             "이 파일의 문자 인코딩을 알 수 없어 내용을 보여줄 수 없습니다. "

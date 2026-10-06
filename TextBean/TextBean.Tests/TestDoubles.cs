@@ -9,6 +9,10 @@ public sealed class FakeClipboard : IClipboardService
     public string? Copied { get; private set; }
     public void Copy(string text) => Copied = text;
 
+    /// 서식째 복사한 마지막 것 (D-126). 글자는 Copied 에도 남는다.
+    public ClipboardPayload? CopiedPayload { get; private set; }
+    public void Copy(ClipboardPayload payload) { CopiedPayload = payload; Copied = payload.Text; }
+
     /// 정리할 때 돌린다 — 정리가 키 지우기보다 먼저인지 뒤인지 본다.
     public Action? DuringClear;
 
@@ -281,7 +285,7 @@ public sealed class GatedDocumentStore(IDocumentStore inner) : IDocumentStore
         return await inner.LoadAsync(fullPath);
     }
 
-    public Task SaveAsync(string fullPath, string text) => SaveAsync(fullPath, text, binding: null);
+    public Task SaveAsync(string fullPath, string text) => SaveAsync(fullPath, DocumentBody.Plain(text), binding: null);
 
     /// 저장마다 부른다 — "저장하는 사이 계속 입력이 들어오는" 경우를 흉내낸다.
     public Action? DuringSave;
@@ -295,7 +299,7 @@ public sealed class GatedDocumentStore(IDocumentStore inner) : IDocumentStore
     private readonly TaskCompletionSource _secondSaveEnded = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _saveCalls;
 
-    public async Task SaveAsync(string fullPath, string text, DocumentKeyBinding? binding)
+    public async Task SaveAsync(string fullPath, DocumentBody body, DocumentKeyBinding? binding)
     {
         var call = Interlocked.Increment(ref _saveCalls);
         DuringSave?.Invoke();
@@ -305,12 +309,19 @@ public sealed class GatedDocumentStore(IDocumentStore inner) : IDocumentStore
 
         try
         {
-            await inner.SaveAsync(fullPath, text, binding);
+            await inner.SaveAsync(fullPath, body, binding);
         }
         finally
         {
             if (call == 2) _secondSaveEnded.TrySetResult();
         }
+    }
+
+    public async Task SavePlainAsync(string fullPath, string text, PlainTextFormat format)
+    {
+        DuringSave?.Invoke();
+        if (_gate is not null) await _gate.Task;
+        await inner.SavePlainAsync(fullPath, text, format);
     }
 
     public Task<IReadOnlyList<DocumentHeader?>> ReadHeadersAsync(IReadOnlyList<string> fullPaths)
@@ -364,4 +375,18 @@ public sealed class FakeAutoSaveTimer : IAutoSaveTimer
     }
 
     public void Dispose() { }
+}
+
+/// <summary>
+/// 글자만 든 본문으로 암호화하는 시험용 줄임. 코덱은 DocumentBody 를 받는다 (D-123) — 시험 대부분은 글자만 본다.
+/// </summary>
+public static class CodecTestExtensions
+{
+    public static byte[] EncryptForNew(this IDocumentCodec codec, string text) => codec.EncryptForNew(DocumentBody.Plain(text));
+
+    public static byte[] EncryptReplacing(this IDocumentCodec codec, string text, ReadOnlySpan<byte> existingHeader, DocumentKeyBinding? binding)
+        => codec.EncryptReplacing(DocumentBody.Plain(text), existingHeader, binding);
+
+    public static byte[] EncryptFor(this IDocumentCodec codec, string text, DocumentKeyBinding binding)
+        => codec.EncryptFor(DocumentBody.Plain(text), binding);
 }

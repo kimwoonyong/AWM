@@ -18,7 +18,10 @@ public interface IDocumentStore
     /// 문서를 잠근 키로만 저장한다. 결속의 세대가 지금 세대가 아니면 <see cref="Services.KeyUnavailableException"/>.
     /// 편집기는 열 때 받은 결속(<see cref="DocumentReadResult.Binding"/>)을 넘긴다.
     /// </summary>
-    Task SaveAsync(string fullPath, string text, DocumentKeyBinding? binding);
+    Task SaveAsync(string fullPath, DocumentBody body, DocumentKeyBinding? binding);
+
+    /// 평문(.txt)을 읽은 형식 그대로 저장한다 (D-117 · D-118). 못 담는 글자면 PlainTextEncodeException.
+    Task SavePlainAsync(string fullPath, string text, PlainTextFormat format);
 
     /// 문서마다 헤더만 읽는다. 읽지 못한 항목은 null — 하나가 실패해도 나머지는 계속한다.
     Task<IReadOnlyList<DocumentHeader?>> ReadHeadersAsync(IReadOnlyList<string> fullPaths);

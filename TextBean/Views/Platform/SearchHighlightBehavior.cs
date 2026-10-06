@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
 using System.Windows.Documents;
 using TextBean.ViewModels;
 
@@ -29,7 +30,7 @@ public static class SearchHighlightBehavior
 
     private static void OnShowMatchesChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        if (d is not TextBox box) return;
+        if (d is not TextBoxBase box) return;
 
         (box.GetValue(StateProperty) as Hookup)?.Detach();
         box.SetValue(StateProperty, (bool)e.NewValue ? new Hookup(box) : null);
@@ -42,11 +43,11 @@ public static class SearchHighlightBehavior
     /// </summary>
     private sealed class Hookup
     {
-        private readonly TextBox _box;
+        private readonly TextBoxBase _box;
         private MatchHighlightAdorner? _adorner;
         private EditorViewModel? _vm;
 
-        public Hookup(TextBox box)
+        public Hookup(TextBoxBase box)
         {
             _box = box;
 
@@ -127,19 +128,47 @@ public static class SearchHighlightBehavior
         /// </summary>
         private void OnReveal(object? sender, int index)
         {
-            if (_vm is null || index < 0 || index > _box.Text.Length) return;
+            if (_box is RichTextBox rich)
+            {
+                RevealRich(rich, index);
+                return;
+            }
 
-            var length = Math.Min(_vm.MatchLength, _box.Text.Length - index);
-            _box.Select(index, Math.Max(length, 0));
+            if (_vm is null || _box is not TextBox box || index < 0 || index > box.Text.Length) return;
+            RevealPlain(box, index);
+        }
 
-            var line = _box.GetLineIndexFromCharacterIndex(index);
-            if (line >= 0) _box.ScrollToLine(line);
+        /// 서식 본문은 줄 바꿈이 켜져 있어(D-130) 가로 스크롤이 없다 — 세로만 맞춘다.
+        private void RevealRich(RichTextBox rich, int index)
+        {
+            if (_vm is null || RichBodyBehavior.GetMap(rich) is not { } map || index < 0 || index > map.Text.Length) return;
+
+            var start = map.PointerAt(index);
+            var end = map.PointerAt(Math.Min(index + _vm.MatchLength, map.Text.Length));
+            if (start is null || end is null) return;
+
+            rich.Selection.Select(start, end);
+
+            var rect = start.GetCharacterRect(LogicalDirection.Forward);
+            if (!rect.IsEmpty && (rect.Top < 0 || rect.Bottom > rich.ActualHeight))
+                rich.ScrollToVerticalOffset(Math.Max(0, rich.VerticalOffset + rect.Top - rich.ActualHeight / 3));
+
+            _adorner?.InvalidateVisual();
+        }
+
+        private void RevealPlain(TextBox box, int index)
+        {
+            var length = Math.Min(_vm!.MatchLength, box.Text.Length - index);
+            box.Select(index, Math.Max(length, 0));
+
+            var line = box.GetLineIndexFromCharacterIndex(index);
+            if (line >= 0) box.ScrollToLine(line);
 
             // 본문은 TextWrapping 이 없어(NoWrap) 긴 줄이 가로로 흐른다 —
             // 세로만 맞추면 일치가 화면 오른쪽 밖에 있다 [실측].
-            var rect = _box.GetRectFromCharacterIndex(index);
-            if (!rect.IsEmpty && (rect.X < 0 || rect.X > _box.ActualWidth - 40))
-                _box.ScrollToHorizontalOffset(Math.Max(0, _box.HorizontalOffset + rect.X - _box.ActualWidth / 3));
+            var rect = box.GetRectFromCharacterIndex(index);
+            if (!rect.IsEmpty && (rect.X < 0 || rect.X > box.ActualWidth - 40))
+                box.ScrollToHorizontalOffset(Math.Max(0, box.HorizontalOffset + rect.X - box.ActualWidth / 3));
 
             _adorner?.InvalidateVisual();
         }

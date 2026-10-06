@@ -7,11 +7,14 @@ using TextBean.Services.Interfaces;
 namespace TextBean.Services;
 
 /// <summary>
-/// TBX1 버전 2 — 사용자가 넣은 키로 잠근다 (D-047). 다른 PC 에서도 exe · 파일 · 키만 있으면 열린다.
+/// TBX1 버전 3 — 사용자가 넣은 키로 잠근다 (D-047). 다른 PC 에서도 exe · 파일 · 키만 있으면 열린다.
+/// 버전 3 은 서식을 담는다 (D-123). 헤더는 버전 2 와 같고 암호화 안의 페이로드만 다르다:
+/// [검색용 글자 UTF-8 길이 4B LE][검색용 글자][서식 문서 XamlPackage — 0B 면 서식 없음].
+/// 버전 1 · 2 는 옛 형식으로 묶어 열지도 덮어쓰지도 않는다 (D-124).
 ///
 /// <code>
 /// 0   TBX1          매직 4B
-/// 4   02            버전
+/// 4   03            버전
 /// 5   KDF 종류       1 = PBKDF2-HMAC-SHA256 + HKDF
 /// 6   반복 횟수      int32 LE
 /// 10  salt          16B   같은 키 문서끼리 공유 (DocumentKeyId)
@@ -28,7 +31,8 @@ public sealed class KeyDocumentCodec(IVaultKeyService keys) : IDocumentCodec
 {
     public const int FixedHeaderLength = 50;
     public const byte LegacyVersion = 1;
-    public const byte CurrentVersion = 2;
+    public const byte CurrentVersion = 3;
+    private const int TextLengthSize = 4;
     public const int SaltLength = 16;
     public const int CheckLength = 8;
     public const int NonceLength = 12;
@@ -66,7 +70,7 @@ public sealed class KeyDocumentCodec(IVaultKeyService keys) : IDocumentCodec
         if (bytes.Length <= VersionOffset || !bytes[..4].SequenceEqual(Magic)) return new(DocumentHeaderKind.NotTextBean);
 
         var version = bytes[VersionOffset];
-        if (version == LegacyVersion) return new(DocumentHeaderKind.Legacy);
+        if (version is >= LegacyVersion and < CurrentVersion) return new(DocumentHeaderKind.Legacy);
         if (version > CurrentVersion) return new(DocumentHeaderKind.Newer);
         if (version != CurrentVersion || bytes.Length < FixedHeaderLength) return new(DocumentHeaderKind.Corrupted);
 
@@ -113,7 +117,10 @@ public sealed class KeyDocumentCodec(IVaultKeyService keys) : IDocumentCodec
                         plain,
                         fileBytes.AsSpan(0, FixedHeaderLength));
 
-            return DocumentReadResult.Success(Utf8NoBom.GetString(plain), new DocumentKeyBinding(lease.Generation, header.Key));
+            var body = Unpack(plain);
+            return body is null
+                ? DocumentReadResult.Fail(DocumentReadStatus.Corrupted)
+                : DocumentReadResult.Success(body, new DocumentKeyBinding(lease.Generation, header.Key));
         }
         catch (AuthenticationTagMismatchException)
         {
@@ -131,14 +138,14 @@ public sealed class KeyDocumentCodec(IVaultKeyService keys) : IDocumentCodec
         }
     }
 
-    public byte[] EncryptForNew(string plainText)
+    public byte[] EncryptForNew(DocumentBody body)
     {
         using var lease = keys.Acquire() ?? throw new KeyUnavailableException(KeyUnavailableReason.NoKey);
         var (id, key) = lease.NewDocumentKey();
-        return Seal(plainText, id, key);
+        return Seal(body, id, key);
     }
 
-    public byte[] EncryptReplacing(string plainText, ReadOnlySpan<byte> existingHeader, DocumentKeyBinding? binding)
+    public byte[] EncryptReplacing(DocumentBody body, ReadOnlySpan<byte> existingHeader, DocumentKeyBinding? binding)
     {
         var header = Parse(existingHeader);
         if (header.Kind != DocumentHeaderKind.Valid)
@@ -149,14 +156,14 @@ public sealed class KeyDocumentCodec(IVaultKeyService keys) : IDocumentCodec
         // 헤더의 네 값(KDF · 반복 · salt · 확인값)이 이 세대의 키와 모두 맞아야 쓴다
         var key = lease.Find(header.Key, header.Check)
                   ?? throw new KeyUnavailableException(KeyUnavailableReason.FileLockedWithOtherKey);
-        return Seal(plainText, header.Key, key);
+        return Seal(body, header.Key, key);
     }
 
-    public byte[] EncryptFor(string plainText, DocumentKeyBinding binding)
+    public byte[] EncryptFor(DocumentBody body, DocumentKeyBinding binding)
     {
         using var lease = AcquireFor(binding);
         var key = lease.FindMatched(binding.Key) ?? throw new KeyUnavailableException(KeyUnavailableReason.KeyChanged);
-        return Seal(plainText, binding.Key, key);
+        return Seal(body, binding.Key, key);
     }
 
     public DocumentKeyState Classify(DocumentHeader header)
@@ -183,9 +190,32 @@ public sealed class KeyDocumentCodec(IVaultKeyService keys) : IDocumentCodec
         return keys.Acquire(binding.Generation) ?? throw new KeyUnavailableException(KeyUnavailableReason.KeyChanged);
     }
 
-    private static byte[] Seal(string plainText, DocumentKeyId id, DerivedKey key)
+    /// 페이로드 = [글자 길이 4B LE][글자 UTF-8][서식 바이트]
+    private static byte[] Pack(DocumentBody body)
     {
-        var plain = Utf8NoBom.GetBytes(plainText);
+        var textLength = Utf8NoBom.GetByteCount(body.Text);
+        var plain = new byte[TextLengthSize + textLength + body.Rich.Length];
+        BinaryPrimitives.WriteInt32LittleEndian(plain, textLength);
+        Utf8NoBom.GetBytes(body.Text, plain.AsSpan(TextLengthSize, textLength));
+        body.Rich.CopyTo(plain.AsSpan(TextLengthSize + textLength));
+        return plain;
+    }
+
+    /// 길이 칸이 어긋나면 null — 태그는 맞았으니 조작이 아니라 이 코드의 결함이나 다른 형식이다. 손상으로 잠근다 (D-005).
+    private static DocumentBody? Unpack(ReadOnlySpan<byte> plain)
+    {
+        if (plain.Length < TextLengthSize) return null;
+
+        var textLength = BinaryPrimitives.ReadInt32LittleEndian(plain);
+        if (textLength < 0 || textLength > plain.Length - TextLengthSize) return null;
+
+        var text = Utf8NoBom.GetString(plain.Slice(TextLengthSize, textLength));
+        return new DocumentBody(text, plain[(TextLengthSize + textLength)..].ToArray());
+    }
+
+    private static byte[] Seal(DocumentBody body, DocumentKeyId id, DerivedKey key)
+    {
+        var plain = Pack(body);
         try
         {
             var output = new byte[FixedHeaderLength + plain.Length + TagLength];

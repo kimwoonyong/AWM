@@ -168,6 +168,12 @@ public sealed class TreeService : ITreeService
         return path;
     }
 
+    /// 이름 변경 입력에서 원래 확장자를 뗀 줄기 (D-122). 확장자만 쓴 입력이면 빈 글자다.
+    public static string StemOf(string newName, string extension)
+        => extension.Length > 0 && newName.EndsWith(extension, StringComparison.OrdinalIgnoreCase)
+            ? newName[..^extension.Length]
+            : newName;
+
     public string Rename(string fullPath, string newName)
     {
         EnsureInsideRoot(fullPath);
@@ -189,7 +195,11 @@ public sealed class TreeService : ITreeService
         // 원본 확장자를 보존한다. .tbx 를 강제로 붙이던 예전 코드는 평문 파일을 파괴했다 —
         // 이름 변경 대화상자의 초기값이 확장자를 뗀 이름이라, .txt 를 고르고 아무것도 고치지 않고
         // 확인만 눌러도 .tbx 가 되고 그 파일은 매직 검사에 걸려 앱 안에서 영영 못 열린다.
-        var destDoc = Path.Combine(parent, newName + Path.GetExtension(fullPath));
+        // 트리는 평문 이름에 확장자를 드러내 창의 처음 값이 「메모.txt」다. 이미 원래 확장자로 끝나면 다시 붙이지 않는다 —
+        // 붙이면 확인만 눌러도 「메모.txt.txt」가 됐다 [실측] (D-122). 대소문자는 가리지 않고 원래 확장자를 쓴다.
+        var extension = Path.GetExtension(fullPath);
+        var stem = StemOf(newName, extension);
+        var destDoc = Path.Combine(parent, stem + extension);
         EnsureInsideRoot(destDoc);
         EnsureHistoryMovable(fullPath, destDoc);
         File.Move(fullPath, destDoc);

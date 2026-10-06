@@ -47,15 +47,15 @@ public class KeyDocumentCodecTests
     }
 
     [Fact]
-    public void 헤더는_TBX1_버전2_PBKDF2_60만회다()
+    public void 헤더는_TBX1_버전3_PBKDF2_60만회다()
     {
         var bytes = _codec.EncryptForNew("x");
 
         Assert.Equal("TBX1"u8.ToArray(), bytes[..4]);
-        Assert.Equal(2, bytes[4]);
+        Assert.Equal(3, bytes[4]);
         Assert.Equal(Pbkdf2KeyDerivation.KdfPbkdf2Sha256, bytes[5]);
         Assert.Equal(KeyDocumentCodec.DefaultIterations, BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(6, 4)));
-        Assert.Equal(KeyDocumentCodec.FixedHeaderLength + 1 + KeyDocumentCodec.TagLength, bytes.Length);
+        Assert.Equal(KeyDocumentCodec.FixedHeaderLength + 4 + 1 + KeyDocumentCodec.TagLength, bytes.Length);   // 글자 길이 칸 4B (D-123)
     }
 
     [Fact]
@@ -73,18 +73,18 @@ public class KeyDocumentCodecTests
     public void 상위_버전이면_NewerVersion()
     {
         var bytes = _codec.EncryptForNew("x");
-        bytes[4] = 3;
+        bytes[4] = 4;
 
         Assert.Equal(DocumentReadStatus.NewerVersion, _codec.Decrypt(bytes).Status);
     }
 
-    /// 옛 exe 는 버전이 1보다 크면 NewerVersion 으로 잠가 새 문서를 덮어쓰지 않는다 (K-11).
+    /// 옛 exe 는 자기 버전보다 크면 NewerVersion 으로 잠가 새 문서를 덮어쓰지 않는다 (K-11 · D-124 — 버전 2 exe 도 같다).
     /// 그 옛 검사를 그대로 옮겨 새 형식에 대 본다 — 옛 코덱은 지웠으므로 규칙만 고정한다.
     [Fact]
     public void 옛_버전의_헤더_검사는_새_문서를_더_최신_버전으로_본다()
     {
         var bytes = _codec.EncryptForNew("x");
-        const byte oldCodecCurrentVersion = 1;
+        const byte oldCodecCurrentVersion = 2;
 
         Assert.True(bytes[..4].SequenceEqual("TBX1"u8.ToArray()) && bytes[4] > oldCodecCurrentVersion);
     }

@@ -13,6 +13,12 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     private readonly IAutoSaveTimer _autoSave;
 
     private string _text = "";
+
+    // 불러온(또는 마지막으로 저장한) 서식 문서. 화면이 붙어 있지 않을 때의 저장 본문이다 (D-123)
+    private byte[] _rich = [];
+
+    // 편집마다 +1. 저장 중 입력 보호는 글자가 아니라 이 값으로 본다 — 서식만 바꾼 입력은 글자로 보이지 않는다 (D-129)
+    private int _editVersion;
     private bool _isDirty;
     private bool _isReadOnly;
     private bool _lastSaveFailed;
@@ -24,6 +30,13 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     private string _snapshotOwnerName = "";
     private bool _isPlainText;
     private string? _encodingLabel;
+    private bool _encodingIsGuess;
+
+    // 평문을 읽은 형식 — 저장할 때 이대로 다시 쓴다 (D-118)
+    private PlainTextFormat? _plainFormat;
+
+    // 평문 인코딩에 못 담는 글자로 실패했을 때의 이유. 자동 저장은 창을 띄우지 않아 상태 줄이 알린다 (D-119)
+    private string? _saveFailReason;
     private DocumentKeyBinding? _binding;
     private DocumentReadStatus _loadStatus = DocumentReadStatus.Ok;
 
@@ -65,6 +78,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             Raise(nameof(DocumentName));
             Raise(nameof(TabTitle));
             Raise(nameof(IsPlainTextFile));
+            Raise(nameof(ShowFormatBar));
             Raise(nameof(HasDocument));
             Raise(nameof(CanCopy));
             Raise(nameof(StatusText));
@@ -100,6 +114,9 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     /// [실측 — 3차 검토, D-091]. 위의 <see cref="IsPlainText"/>(읽는 데 성공한 평문)는 배너 톤과 키 바꿀 때 닫을 탭 판정이 쓴다 — 뜻을 바꾸지 않는다.
     /// </summary>
     public bool IsPlainTextFile => CurrentPath is { } path && PathRules.IsPlainText(path);
+
+    /// 서식 도구 모음 — .tbx 를 고칠 수 있을 때만 (D-127). .txt 는 서식을 담지 못한다.
+    public bool ShowFormatBar => HasDocument && !IsPlainTextFile && !IsReadOnly;
 
     /// 무엇으로 읽었는지. 평문이 아니면 null.
     public string? EncodingLabel => _encodingLabel;
@@ -153,9 +170,13 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         {
             if (!HasDocument) return "문서를 선택하세요";
 
-            // 평문은 고장이 아니라 정상 동작이다. "저장할 수 없습니다"를 그대로 쓰면
-            // 사용자가 앱이 망가졌다고 읽는다.
-            if (IsPlainText) return $"보기 전용 · {_encodingLabel}";
+            // 평문은 무엇으로 읽었는지(추정인지)를 늘 앞에 붙인다 — 인코딩을 잘못 고르면 깨진 글자가 조용히 그려진다 (D-021)
+            if (IsPlainText)
+            {
+                var encoding = _encodingLabel + (_encodingIsGuess ? "(추정)" : "");
+                if (_lastSaveFailed) return $"{encoding} · ⚠ 저장 실패 — {_saveFailReason ?? "내용이 아직 저장되지 않았습니다"}";
+                return $"{encoding} · {(IsDirty ? "저장 중…" : "저장됨")}";
+            }
             if (IsReadOnly) return "읽기 전용 — 저장할 수 없습니다";
             if (_lastSaveFailed && SaveBlockedByKey) return "⚠ 저장할 수 없음 — 이 파일은 지금 키로 잠긴 문서가 아닙니다";
             if (_lastSaveFailed) return "⚠ 저장 실패 — 내용이 아직 저장되지 않았습니다";
@@ -170,6 +191,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         {
             if (!Set(ref _text, value)) return;
 
+            _editVersion++;
             IsDirty = true;
             Raise(nameof(CanCopy));
 
@@ -180,6 +202,62 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             // 입력이 멈추면 자동으로 저장한다 (D-015). 잠긴 문서는 저장 경로가 막혀 있다.
             if (!IsReadOnly && HasDocument) _autoSave.Restart();
         }
+    }
+
+    // ── 서식 본문 (.tbx — RichTextBox, D-125) ─────────────────────────────────
+    // 서식 문서는 화면이 들고 있다(FlowDocument 는 바인딩할 수 없다). 이 편집기는 검색용 글자와 편집 사실만 받는다.
+
+    /// 불러온 서식 문서(XamlPackage). 비면 서식 없음 — 화면이 Text 를 문단으로 나눠 보인다 (D-123).
+    public byte[] Rich => _rich;
+
+    /// 화면이 등록한다: 지금 본문을 [검색용 글자 + 서식 바이트]로 뽑는다. UI 스레드에서 부른다.
+    /// 없으면(화면이 아직 없거나 시험) 불러온 본문을 그대로 저장한다.
+    public Func<DocumentBody>? CaptureBody { get; set; }
+
+    /// 화면이 등록한다: 문서 전체를 서식째 복사할 내용 (「전체 복사」).
+    public Func<ClipboardPayload>? CaptureAllForCopy { get; set; }
+
+    /// 화면이 알린다: 글자든 서식이든 본문이 바뀌었다. 글자는 SyncText 로 따로 온다.
+    public void MarkEdited()
+    {
+        if (IsReadOnly || !HasDocument) return;
+
+        _editVersion++;
+        IsDirty = true;
+        _autoSave.Restart();
+    }
+
+    /// <summary>
+    /// 화면이 알린다: 서식 문서에서 뽑은 글자 (D-128). 수정됨으로 치지 않는다 — 수정은 MarkEdited 가 알린다.
+    /// 불러온 직후에도 부른다. 문단 줄바꿈 표기가 저장된 글자와 다를 수 있어, 안 맞추면 찾기 위치가 어긋난다.
+    /// </summary>
+    public void SyncText(string text)
+    {
+        if (!Set(ref _text, text, nameof(Text))) return;
+
+        Raise(nameof(CanCopy));
+        RecomputeMatches();
+    }
+
+    /// <summary>
+    /// 화면이 알린다: 서식 바이트를 문서로 만들지 못했다. 손상으로 잠근다 —
+    /// 빈 문서로 두고 저장을 열어 두면 자동 저장이 원본을 덮는다 (D-005).
+    /// </summary>
+    public void RichLoadFailed(Exception ex)
+    {
+        AppLog.Warn("rich-load", CurrentPath, ex);       // 경로와 예외 형식까지만 (PROHIBITED-CUSTOM-04)
+
+        _autoSave.Stop();
+        _text = "";
+        _rich = [];
+        _loadFailed = true;
+        _loadStatus = DocumentReadStatus.Corrupted;
+        IsReadOnly = true;
+        IsDirty = false;
+        LockReason = DocumentReadResult.Fail(DocumentReadStatus.Corrupted).UserMessage;
+        Raise(nameof(Text));
+        Raise(nameof(CanCopy));
+        ClearSearch();
     }
 
     // ── 문서 안에서 찾기 (Ctrl+F) ────────────────────────────────────────────
@@ -327,7 +405,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     public bool IsReadOnly
     {
         get => _isReadOnly;
-        private set { if (Set(ref _isReadOnly, value)) { Raise(nameof(StatusText)); Raise(nameof(SaveState)); } }
+        private set { if (Set(ref _isReadOnly, value)) { Raise(nameof(StatusText)); Raise(nameof(SaveState)); Raise(nameof(ShowFormatBar)); } }
     }
 
     public string? LockReason
@@ -365,45 +443,39 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
         if (result.IsOk && !tooBig)
         {
-            // 평문에는 되돌릴 지점이 필요 없다 — 저장이 막혀 있어 "이번에 연 뒤로 내가 망친 것"이
-            // 생기지 않는다. 남기면 암호화되지 않은 사본이 숨김 폴더에 하나 더 생기고, 그 사본은
-            // 이름이 opened.tbx 라 앱이 다시 읽지도 못한다. D-016 의 취지에 정면으로 어긋난다.
+            // 평문은 되돌릴 사본을 남기지 않는다 (D-117) — 남기면 암호화되지 않은 사본이 숨김 폴더에 하나 더 생기고,
+            // 그 사본은 이름이 opened.tbx 라 앱이 다시 읽지도 못한다.
             if (!isPlain) _store.CaptureOpenSnapshot(fullPath);
 
             _text = result.Text!;
+            _rich = result.Rich ?? [];
 
-            // "읽기에 성공했다"와 "쓸 수 있다"를 여기서 가른다. 예전에는 이 한 줄이 무조건
-            // false 라, 평문을 화면에 흐르게 하는 순간 저장까지 함께 열렸다.
-            IsReadOnly = isPlain;
-            LockReason = isPlain ? PlainTextNotice(result) : null;
+            // 평문도 고칠 수 있다 (D-117). 읽은 형식 그대로 다시 쓴다 (D-118)
+            IsReadOnly = false;
+            LockReason = null;
             _loadFailed = false;
             _isPlainText = isPlain;
             _encodingLabel = result.EncodingLabel;
+            _encodingIsGuess = result.EncodingIsGuess;
+            _plainFormat = result.PlainFormat;
         }
         else
         {
             // 읽기에 성공하지 못한 모든 경우를 잠근다 (D-005).
             // 본문을 비워두고 저장을 막지 않으면 빈 편집기가 원본을 덮는다.
             _text = "";
+            _rich = [];
             IsReadOnly = true;
             LockReason = tooBig ? TooBigNotice(result.Text!.Length) : result.UserMessage;
             _loadFailed = true;
             _isPlainText = false;
             _encodingLabel = null;
+            _encodingIsGuess = false;
+            _plainFormat = null;
         }
 
         Finish();
     }
-
-    /// <summary>
-    /// 무엇으로 읽었는지와 그것이 확정인지 추정인지를 반드시 함께 말한다.
-    /// 인코딩을 잘못 고르면 예외도 빈 화면도 없이 깨진 글자가 그대로 그려지기 때문에 [실측],
-    /// 이 문구가 사용자가 오판을 알아챌 유일한 수단이다.
-    /// </summary>
-    private static string PlainTextNotice(DocumentReadResult result)
-        => $"암호화되지 않은 파일입니다 · {result.EncodingLabel}로 읽었습니다"
-           + (result.EncodingIsGuess ? "(추정)" : "")
-           + " · 보기 전용";
 
     private static string TooBigNotice(int length)
         => $"내용이 너무 길어({length:N0}자) 화면에 띄우지 않습니다. 표시 한도는 {MaxDisplayChars:N0}자입니다. "
@@ -429,6 +501,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
         // 옛 내용이 원본에 저장되는 경로가 열린다.
         CurrentPath = snapshotPath;
         _text = result.IsOk ? result.Text! : "";
+        _rich = result.IsOk ? result.Rich ?? [] : [];
         _loadFailed = !result.IsOk;
         IsReadOnly = true;                       // 스냅샷에는 어떤 경우에도 저장하지 않는다
         LockReason = result.IsOk
@@ -442,6 +515,7 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     {
         _autoSave.Stop();          // 이전 문서에 대한 예약 저장이 새 문서에 적용되면 안 된다
         _lastSaveFailed = false;
+        Raise(nameof(Rich));       // 화면이 이것을 보고 서식 문서를 새로 만든다
         Raise(nameof(Text));
         Raise(nameof(CanCopy));
         Raise(nameof(TabTitle));
@@ -491,14 +565,26 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
     {
         // 보낼 본문을 잡아 둔다. 저장을 기다리는 사이 사용자가 친 글자는 이번 저장에 없다 —
         // 끝난 뒤 "수정됨"을 무조건 끄면 그 글자는 다시 저장되지 않고, 탭을 닫으면 사라진다 [실측].
-        var saving = Text;
+        // 서식만 바꾼 입력도 지켜야 해서 글자가 아니라 편집 버전으로 본다 (D-129).
+        var version = _editVersion;
         try
         {
-            await _store.SaveAsync(path, saving, _binding);
+            // 평문은 키 · 암호화 경로를 타지 않는 따로 된 갈래로 저장한다 (D-120)
+            if (_isPlainText)
+            {
+                await _store.SavePlainAsync(path, Text, _plainFormat!);
+            }
+            else
+            {
+                var body = CaptureBody?.Invoke() ?? new DocumentBody(Text, _rich);
+                await _store.SaveAsync(path, body, _binding);
+                _rich = body.Rich;
+            }
 
             // 그 사이 입력이 있었으면 수정됨을 유지한다. 입력이 이미 자동 저장을 다시 예약했다.
-            if (string.Equals(Text, saving, StringComparison.Ordinal)) IsDirty = false;
+            if (_editVersion == version) IsDirty = false;
             _lastSaveFailed = false;
+            _saveFailReason = null;
             SaveBlockedByKey = false;
             Raise(nameof(StatusText));
             Raise(nameof(SaveState));
@@ -509,13 +595,14 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
             // 경로와 예외 타입까지만. 내용은 절대 싣지 않는다 (PROHIBITED-CUSTOM-04)
             AppLog.Error("save", path, ex);
             _lastSaveFailed = true;
+            _saveFailReason = ex is PlainTextEncodeException ? ex.Message : null;
             SaveBlockedByKey = ex is KeyUnavailableException;
             Raise(nameof(StatusText));
             Raise(nameof(SaveState));
 
             if (notifyUser)
             {
-                var reason = ex is LinkedPathException or KeyUnavailableException
+                var reason = ex is LinkedPathException or KeyUnavailableException or PlainTextEncodeException
                     ? $"\n\n{ex.Message}"
                     : $"\n({ex.GetType().Name})";
                 _dialogs.Error("저장 실패", $"문서를 저장하지 못했습니다.\n\n{path}{reason}");
@@ -571,10 +658,26 @@ public sealed class EditorViewModel : ObservableObject, IDisposable
 
     public void Copy(string? selectedText)
     {
+        // 서식 문서의 「전체 복사」는 서식째 보낸다 (D-126). 빈지 아닌지는 뽑은 본문이 말한다(CopyRich)
+        if (string.IsNullOrEmpty(selectedText) && !_isPlainText && CaptureAllForCopy is { } all)
+        {
+            if (HasDocument && !_loadFailed) CopyRich(all());
+            return;
+        }
+
         if (!CanCopy) return;
 
         var payload = string.IsNullOrEmpty(selectedText) ? Text : selectedText;
         if (payload.Length == 0) return;
+
+        _clipboard.Copy(payload);
+    }
+
+    /// 서식 본문에서 고른 것(또는 전체)을 서식째 보낸다. 기록 제외 · 30초 자동 비움 경로는 같다 (D-007 · D-126).
+    public void CopyRich(ClipboardPayload payload)
+    {
+        // CanCopy 는 보지 않는다 — 검색용 글자는 입력 뒤 조금 늦게 맞춰져, 빈 문서에 치자마자 복사하면 "빈 문서"로 보인다 [실측 — 시험]
+        if (!HasDocument || _loadFailed || payload.Text.Length == 0) return;
 
         _clipboard.Copy(payload);
     }

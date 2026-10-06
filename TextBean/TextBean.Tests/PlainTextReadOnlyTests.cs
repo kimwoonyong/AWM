@@ -24,7 +24,7 @@ public class PlainTextReadOnlyTests
     }
 
     [Fact]
-    public async Task 평문은_읽기에_성공하고_읽기_전용으로_열린다()
+    public async Task 평문은_읽기에_성공하고_고칠_수_있게_열린다()
     {
         using var vault = new TempVault();
         var (editor, _, _) = Build(vault);
@@ -33,30 +33,27 @@ public class PlainTextReadOnlyTests
         await editor.LoadAsync(path);
 
         Assert.Equal(Body, editor.Text);
-        Assert.True(editor.IsReadOnly);
+        Assert.False(editor.IsReadOnly);         // D-117
         Assert.False(editor.LoadFailed);        // 읽기 실패와 구분되어야 본문·복사·문구가 갈린다
         Assert.True(editor.IsPlainText);
         Assert.True(editor.CanCopy);
         Assert.Equal("UTF-8", editor.EncodingLabel);
     }
 
-    /// <summary>
-    /// 배너는 Visibility 가 IsReadOnly 에만, Text 가 LockReason 에만 묶여 있다.
-    /// 문구를 비우면 글자 없는 붉은 띠가 그려진다 — 화면이 고장난다.
-    /// </summary>
+    /// 인코딩을 잘못 고르면 깨진 글자가 조용히 그려진다 — 상태 줄이 무엇으로 읽었는지(추정인지)를 늘 말한다 (D-021).
     [Fact]
-    public async Task 평문_배너_문구가_비어_있지_않고_인코딩을_말한다()
+    public async Task 평문_상태_줄이_인코딩과_추정을_말한다()
     {
         using var vault = new TempVault();
         var (editor, _, _) = Build(vault);
 
         await editor.LoadAsync(vault.WriteRaw("메모.txt", PlainBytes));
 
-        Assert.False(string.IsNullOrWhiteSpace(editor.LockReason));
-        Assert.Contains("암호화되지 않은", editor.LockReason!);
-        Assert.Contains("UTF-8", editor.LockReason!);
-        Assert.Contains("추정", editor.LockReason!);        // BOM 이 없으므로 확정이라고 말하면 안 된다
-        Assert.Contains("보기 전용", editor.StatusText);    // "저장할 수 없습니다"는 고장처럼 읽힌다
+        Assert.Null(editor.LockReason);                       // 잠긴 문서가 아니다 — 배너가 뜨지 않는다
+        Assert.Equal("UTF-8(추정) · 저장됨", editor.StatusText);  // BOM 이 없으므로 확정이라고 말하면 안 된다
+
+        editor.Text = "고친 값";
+        Assert.Equal("UTF-8(추정) · 저장 중…", editor.StatusText);
     }
 
     [Fact]
@@ -69,43 +66,26 @@ public class PlainTextReadOnlyTests
         await editor.LoadAsync(vault.WriteRaw("메모.txt", bytes));
 
         Assert.Equal("UTF-8 (BOM)", editor.EncodingLabel);
-        Assert.DoesNotContain("추정", editor.LockReason!);
+        Assert.DoesNotContain("추정", editor.StatusText);
     }
 
-    /// 여는 것만으로는 타이머가 무장되지 않는다. 무장시키는 것은 Text 세터 하나뿐이다.
+    /// 금고 문서와 같다 — 입력이 멈추면 1.5초 뒤 자동 저장 (D-117)
     [Fact]
-    public async Task 평문은_타이핑해도_자동저장이_예약되지_않는다()
-    {
-        using var vault = new TempVault();
-        var (editor, timer, _) = Build(vault);
-        await editor.LoadAsync(vault.WriteRaw("메모.txt", PlainBytes));
-
-        editor.Text = "덮어쓰려는 값";
-
-        Assert.Equal(0, timer.RestartCount);
-        Assert.False(timer.IsRunning);
-    }
-
-    /// <summary>
-    /// 모든 쓰기 경로를 연달아 두들기고 <b>원본 바이트가 그대로인지</b>만 본다.
-    /// 경로가 하나 늘어도 이 테스트는 그대로 유효하다.
-    /// </summary>
-    [Fact]
-    public async Task 모든_저장_경로를_거쳐도_원본_바이트가_그대로다()
+    public async Task 평문도_타이핑하면_자동저장이_예약되고_저장된다()
     {
         using var vault = new TempVault();
         var (editor, timer, _) = Build(vault);
         var path = vault.WriteRaw("메모.txt", PlainBytes);
         await editor.LoadAsync(path);
 
-        editor.Text = "덮어쓰려는 값";
+        editor.Text = "고친 값";
+        Assert.Equal(1, timer.RestartCount);
 
-        timer.Fire();                                            // 예약이 없으면 아무 일도 없어야 한다
-        Assert.False(await editor.TrySaveAsync());               // Ctrl+S
-        Assert.True(await editor.ConfirmLeaveAsync());           // 탭 떠나기 — 잃을 편집 내용이 없다
-        Assert.True(await editor.TrySaveForLeaveAsync());        // 종료 시 저장
+        timer.Fire();
+        await editor.TrySaveForLeaveAsync();                     // 자동 저장이 끝나기를 기다리는 대신 같은 저장 문을 한 번 더 지난다
 
-        Assert.Equal(PlainBytes, File.ReadAllBytes(path));
+        Assert.Equal("고친 값", Encoding.UTF8.GetString(File.ReadAllBytes(path)));
+        Assert.False(editor.IsDirty);
     }
 
     /// 대조군이 없으면 "아무 일도 안 일어난다"가 버그인지 설계인지 구분되지 않는다.

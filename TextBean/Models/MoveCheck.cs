@@ -34,7 +34,7 @@ public sealed record MoveCheck(MoveRejection Reason)
         MoveRejection.ReservedFolder => "앱이 쓰는 폴더로는 옮길 수 없습니다.",
         MoveRejection.NameTaken => "옮길 위치에 같은 이름이 이미 있습니다.",
         MoveRejection.PathTooLong => "옮기면 경로가 너무 길어집니다. 더 얕은 폴더를 골라주세요.",
-        MoveRejection.SourceMissing => "옮기려는 항목을 찾을 수 없습니다. F5로 새로고침해주세요.",
+        MoveRejection.SourceMissing => "옮기려는 항목을 찾을 수 없습니다. 도구 모음 [새로고침](기본 F5)으로 새로고침해주세요.",
         MoveRejection.DestinationNotFolder => "폴더 위에만 놓을 수 있습니다.",
         _ => "옮길 수 없습니다."
     };

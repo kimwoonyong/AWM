@@ -1,5 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Controls.Primitives;
+using System.Windows.Documents;
 using System.Windows.Input;
 using TextBean.ViewModels;
 
@@ -27,7 +29,7 @@ public static class EditorBehavior
 
     private static void OnInterceptCopyChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
-        if (d is not TextBox box) return;
+        if (d is not TextBoxBase box) return;
 
         if ((bool)e.NewValue) DataObject.AddCopyingHandler(box, OnCopying);
         else DataObject.RemoveCopyingHandler(box, OnCopying);
@@ -35,6 +37,12 @@ public static class EditorBehavior
 
     private static void OnCopying(object sender, DataObjectCopyingEventArgs e)
     {
+        if (sender is RichTextBox rich)
+        {
+            OnRichCopying(rich, e);
+            return;
+        }
+
         if (sender is not TextBox box) return;
 
         var isCut = !box.IsReadOnly
@@ -53,6 +61,31 @@ public static class EditorBehavior
         vm.Copy(selected);                                         // 기록 제외 + 30초 자동 비움 경로
 
         if (isCut) box.SelectedText = "";
+    }
+
+    /// <summary>
+    /// 서식 본문 (D-126). 규칙은 위와 같다 — 먼저 취소, 끌기면 끝, 선택이 없으면 문서 전체.
+    /// 서식(Rtf · XamlPackage)도 같은 기록 제외 DataObject 로 보낸다. RichTextBox 기본 복사는 이 형식들을
+    /// 플래그 없이 클립보드에 쓴다 [실측 — Text · UnicodeText · Rtf · Xaml · XamlPackage].
+    /// </summary>
+    private static void OnRichCopying(RichTextBox box, DataObjectCopyingEventArgs e)
+    {
+        var isCut = !box.IsReadOnly
+                    && !box.Selection.IsEmpty
+                    && Keyboard.Modifiers == ModifierKeys.Control
+                    && Keyboard.IsKeyDown(Key.X);
+
+        e.CancelCommand();
+
+        if (e.IsDragDrop) return;
+        if (box.DataContext is not EditorViewModel vm) return;
+
+        var range = box.Selection.IsEmpty
+            ? new TextRange(box.Document.ContentStart, box.Document.ContentEnd)
+            : new TextRange(box.Selection.Start, box.Selection.End);
+        vm.CopyRich(RichBodyBehavior.PayloadOf(range));
+
+        if (isCut) box.Selection.Text = "";
     }
 
     // ── 검색창 전용 복사 ─────────────────────────────────────────────────────

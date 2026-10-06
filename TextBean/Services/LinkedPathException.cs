@@ -15,5 +15,5 @@ public sealed class LinkedPathException(string linkInsideVault, bool appArea)
            "금고 밖에 쓰거나 지우지 않았습니다. " +
            (appArea
                ? "이 폴더는 앱이 이력·휴지통을 두는 곳이라 새로고침으로는 풀리지 않습니다. 금고 폴더를 탐색기에서 확인해주세요."
-               : "F5 로 새로고침하세요.");
+               : "도구 모음 [새로고침](기본 F5)으로 새로고침하세요.");   // 단축키는 바뀔 수 있다 (D-113)
 }

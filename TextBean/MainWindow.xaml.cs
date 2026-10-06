@@ -9,6 +9,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using TextBean.ViewModels;
 using TextBean.Views;
+using TextBean.Views.Dialogs;
 using TextBean.Views.Platform;
 
 namespace TextBean;
@@ -57,10 +58,10 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 본문 TextBox 에 포커스를 준다. 한 지점에만 둔다 — 화면 시험은 이것을 바꿔 끼워 실제 키보드 포커스를 잡지 않는다.
+    /// 본문(.txt 는 TextBox, .tbx 는 RichTextBox)에 포커스를 준다. 한 지점에만 둔다 — 화면 시험은 이것을 바꿔 끼워 실제 키보드 포커스를 잡지 않는다.
     /// 실제 포커스는 Win32 SetFocus 로 화면 밖 시험 창을 앞 창으로 만들 수 있다 (D-082).
     /// </summary>
-    public Action<TextBox> FocusBody { get; set; } = textBox => textBox.Focus();
+    public Action<TextBoxBase> FocusBody { get; set; } = textBox => textBox.Focus();
 
     /// ▾ 목록에서 고른 탭으로 가고, 바로 이어 칠 수 있게 그 본문으로 포커스를 옮긴다 (plan §3-6).
     private void OnTabPicked(object? sender, object entry)
@@ -80,13 +81,25 @@ public partial class MainWindow : Window
         });
     }
 
-    /// 활성 탭의 본문 TextBox. 본문은 탭마다 하나씩 TabBodies 가 만든다.
-    public TextBox? FindActiveBodyTextBox()
+    /// 활성 탭의 본문(TextBox 또는 RichTextBox). 본문은 탭마다 하나씩 TabBodies 가 만든다.
+    public TextBoxBase? FindActiveBodyTextBox()
     {
         if (Vm.ActiveTab is not { } active || TabBodies.ItemContainerGenerator.ContainerFromItem(active) is not DependencyObject host)
             return null;
 
-        return FindDescendant<TextBox>(host);
+        return FindDescendant<TextBoxBase>(host);
+    }
+
+    /// 글자색 · 형광펜 목록에서 하나를 고르면 목록을 닫는다. 서식은 단추의 명령이 칠한다 (D-127).
+    private void OnFormatPopupPick(object sender, RoutedEventArgs e)
+    {
+        for (var at = sender as DependencyObject; at is not null; at = LogicalTreeHelper.GetParent(at))
+        {
+            if (at is not Popup popup) continue;
+
+            popup.IsOpen = false;
+            return;
+        }
     }
 
     private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
@@ -112,6 +125,8 @@ public partial class MainWindow : Window
             old.SearchWindowRequested -= OnSearchWindowRequested;
             old.ActiveTabRevealRequested -= OnActiveTabRevealRequested;
             old.ExitRequested -= OnExitRequested;
+            old.ShortcutsChanged -= OnShortcutsChanged;
+            old.ShortcutsRequested -= OnShortcutsRequested;
         }
 
         if (e.NewValue is ShellViewModel fresh)
@@ -123,10 +138,45 @@ public partial class MainWindow : Window
             // 탭 줄의 어떤 훅도 돌지 않는다 — 셸이 신호를 낸다 (D-077)
             fresh.ActiveTabRevealRequested += OnActiveTabRevealRequested;
             fresh.ExitRequested += OnExitRequested;
+            fresh.ShortcutsChanged += OnShortcutsChanged;
+            fresh.ShortcutsRequested += OnShortcutsRequested;
         }
+
+        ApplyShortcuts();
     }
 
     private void OnExitRequested(object? sender, EventArgs e) => RequestExit();
+
+    // ── 단축키 (D-110) ───────────────────────────────────────────────────────
+
+    private readonly List<KeyBinding> _shortcutBindings = [];
+
+    private void OnShortcutsChanged(object? sender, EventArgs e) => ApplyShortcuts();
+
+    /// 셸의 키 표로 창 단축키를 다시 만든다. 옛 키는 지운다 — 남으면 바꾼 뒤에도 옛 키가 듣는다.
+    private void ApplyShortcuts()
+    {
+        foreach (var binding in _shortcutBindings) InputBindings.Remove(binding);
+        _shortcutBindings.Clear();
+
+        if (DataContext is not ShellViewModel shell) return;
+
+        foreach (var (id, key) in shell.Shortcuts)
+        {
+            if (key is null || shell.CommandFor(id) is not { } command) continue;
+            if (ShortcutsDialog.ToGesture(key) is not { } gesture) continue;   // 검사를 지난 키라 오지 않는다
+
+            var binding = new KeyBinding(command, gesture);
+            _shortcutBindings.Add(binding);
+            InputBindings.Add(binding);
+        }
+    }
+
+    private void OnShortcutsRequested(object? sender, EventArgs e)
+    {
+        var dialog = new ShortcutsDialog { Owner = this, DataContext = new ShortcutsViewModel(Vm) };
+        dialog.ShowDialog();
+    }
 
     // ── 트레이 상주 ──────────────────────────────────────────────────────────
     // ✕ · Alt+F4 · 시스템 메뉴 「닫기」는 WM_SYSCOMMAND/SC_CLOSE 로 온다. 코드의 Close() 는 이 길을 타지 않아

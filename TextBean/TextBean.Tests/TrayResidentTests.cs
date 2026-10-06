@@ -873,12 +873,12 @@ public class TrayResidentTests
     {
         using var scene = TabScene.Open(2);
         var seams = new Seams(scene.Window);
-        Hide(scene);                                       // 숨은 채 — 숨은 앱은 종료를 막지도 묻지도 못한다
 
         // 앞 탭은 저장이 막히고 뒤 탭은 입력 중이다. 조용한 저장은 막힌 탭을 지나 뒤 탭까지 저장한다 —
         // 대화상자 있는 저장(종료)은 앞 탭에서 멈춘다. 운영 오버로드가 조용한 쪽에 이어졌는지 본다 (R15)
-        scene.Tab(0).Text = "저장 실패할 값";
-        scene.Tab(1).Text = "끄기 직전 값";
+        Hide(scene);                                       // 숨은 채 — 숨은 앱은 종료를 막지도 묻지도 못한다
+        scene.TypeInto(0, "저장 실패할 값");
+        scene.TypeInto(1, "끄기 직전 값");
         var confirms = scene.Dialogs.ConfirmCount;
 
         ReadOnly(scene.Paths[0], true);
@@ -951,7 +951,7 @@ public class TrayResidentTests
         var power = new FakePowerEvents();
         using var suspend = new SuspendLock(power, scene.Window, scene.Shell, TimeSpan.FromSeconds(5));
         Hide(scene);
-        scene.Tab(1).Text = "절전 전 값";
+        scene.TypeInto(1, "절전 전 값");                 // 숨은 채 입력이 저장되지 않은 상태로 절전
         var confirms = scene.Dialogs.ConfirmCount;
 
         power.RaiseSuspending();

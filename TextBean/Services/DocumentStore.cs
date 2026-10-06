@@ -13,7 +13,7 @@ public sealed class DocumentStore(ITreeService tree, IDocumentCodec codec) : IDo
         // 아무것도 안 만들면 F5나 재시작에 새 노드가 조용히 사라진다. 0바이트로 만들면
         // 매직 검사에 걸려 읽기 전용으로 잠기고, 저장이 완전히 차단되므로 앱 안에서는
         // 영영 쓸 수 없는 파일이 된다. 유효한 빈 문서만이 두 함정을 모두 피한다 (D-009).
-        return File.WriteAllBytesAsync(fullPath, codec.EncryptForNew(string.Empty));
+        return File.WriteAllBytesAsync(fullPath, codec.EncryptForNew(DocumentBody.Empty));
     }
 
     /// <summary>
@@ -105,7 +105,7 @@ public sealed class DocumentStore(ITreeService tree, IDocumentCodec codec) : IDo
         return File.Exists(snapshot) ? snapshot : null;
     }
 
-    public Task SaveAsync(string fullPath, string text) => SaveAsync(fullPath, text, binding: null);
+    public Task SaveAsync(string fullPath, string text) => SaveAsync(fullPath, DocumentBody.Plain(text), binding: null);
 
     /// <summary>
     /// 저장은 그 문서를 잠근 키로만 한다. 파일이 있으면 디스크 헤더의 키로, 없으면 결속의 키로.
@@ -113,7 +113,7 @@ public sealed class DocumentStore(ITreeService tree, IDocumentCodec codec) : IDo
     /// 조용히 새 키로 다시 잠그면, 사용자는 옛 키로 돌아가 "열리지 않는 문서"를 보고 잃은 줄 안다.
     /// 결속이 없으면 지금 세대로 본다(테스트·기존 호출).
     /// </summary>
-    public async Task SaveAsync(string fullPath, string text, DocumentKeyBinding? binding)
+    public async Task SaveAsync(string fullPath, DocumentBody body, DocumentKeyBinding? binding)
     {
         tree.EnsureInsideRoot(fullPath);
 
@@ -132,8 +132,8 @@ public sealed class DocumentStore(ITreeService tree, IDocumentCodec codec) : IDo
 
         var existing = File.Exists(fullPath);
         var cipher = existing
-            ? codec.EncryptReplacing(text, ReadHead(fullPath), binding)
-            : binding is null ? codec.EncryptForNew(text) : codec.EncryptFor(text, binding);
+            ? codec.EncryptReplacing(body, ReadHead(fullPath), binding)
+            : binding is null ? codec.EncryptForNew(body) : codec.EncryptFor(body, binding);
 
         // 임시 파일은 반드시 같은 폴더에 — 다른 볼륨이면 원자적 교체가 성립하지 않는다
         var temp = Path.Combine(folder, Path.GetFileName(fullPath) + ".tmp");
@@ -143,7 +143,10 @@ public sealed class DocumentStore(ITreeService tree, IDocumentCodec codec) : IDo
 
             // 되읽어 푼다. 디스크에 제대로 닿지 않은 판으로 원본을 바꾸면 되돌릴 길이 없다.
             var check = codec.Decrypt(await File.ReadAllBytesAsync(temp));
-            if (!check.IsOk || !string.Equals(check.Text, text, StringComparison.Ordinal))
+            // 서식 바이트도 비교한다 — 서식만 바꾼 저장에서 글자만 보면 깨진 서식을 맞다고 본다
+            if (!check.IsOk
+                || !string.Equals(check.Text, body.Text, StringComparison.Ordinal)
+                || !check.Rich.AsSpan().SequenceEqual(body.Rich))
                 throw new IOException("저장한 내용을 다시 읽어 확인하지 못했습니다.");
 
             // 저장마다 세대를 쌓지 않는다. 되돌릴 기준은 "이번에 문서를 연 시점"이고
@@ -155,6 +158,43 @@ public sealed class DocumentStore(ITreeService tree, IDocumentCodec codec) : IDo
         {
             TryDelete(temp);
             throw;      // 호출자가 수정 상태를 유지하고 전환/종료를 취소한다
+        }
+    }
+
+    /// <summary>
+    /// 평문(.txt) 저장 (D-117 · D-120). 키 · 암호화 경로를 타지 않는다 — 위 SaveAsync 의 "평문 거부"는 그대로 둔다.
+    /// 읽은 형식(인코딩 · BOM · 줄바꿈)으로 다시 쓴다. 이력 · 열었을 때 사본은 남기지 않는다(평문 사본을 늘리지 않는다).
+    /// 교체 방식(같은 폴더 임시 파일 → 되읽기 확인 → File.Replace)은 암호 문서와 같다.
+    /// </summary>
+    public async Task SavePlainAsync(string fullPath, string text, PlainTextFormat format)
+    {
+        tree.EnsureInsideRoot(fullPath);
+
+        if (!PathRules.IsPlainText(fullPath))
+            throw new InvalidOperationException("평문 형식으로는 .txt 만 저장합니다.");
+
+        var folder = Path.GetDirectoryName(fullPath)!;
+        if (!Directory.Exists(folder))
+            throw new DirectoryNotFoundException("문서가 있던 폴더를 찾을 수 없습니다.");
+
+        var bytes = PlainTextReader.Encode(text, format);     // 못 담는 글자면 여기서 던진다 — 파일은 그대로다
+
+        var existing = File.Exists(fullPath);
+        var temp = Path.Combine(folder, Path.GetFileName(fullPath) + ".tmp");
+        try
+        {
+            await WriteDurablyAsync(temp, bytes);
+
+            if (!(await File.ReadAllBytesAsync(temp)).AsSpan().SequenceEqual(bytes))
+                throw new IOException("저장한 내용을 다시 읽어 확인하지 못했습니다.");
+
+            if (existing && File.Exists(fullPath)) await ReplaceAsync(temp, fullPath);
+            else File.Move(temp, fullPath);
+        }
+        catch
+        {
+            TryDelete(temp);
+            throw;
         }
     }
 

@@ -104,6 +104,13 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         // 끄는 것은 창의 닫기 절차(저장 → 다시 닫기)다. 바쁨 검사도 거기서 한다 — 여기서 Shutdown 을 부르면
         // Closing 취소가 무시되어 저장이 버려진다 [실측 — 모의] (D-097)
         ExitCommand      = new RelayCommand(_ => ExitRequested?.Invoke(this, EventArgs.Empty));
+
+        // 목록 창을 띄우는 것은 View 의 일이다 (D-013) — 요청만 낸다
+        OpenShortcutsCommand = new RelayCommand(_ => ShortcutsRequested?.Invoke(this, EventArgs.Empty));
+
+        // 잘못 적힌 줄은 그 줄만 기본 키로 — 앱은 뜬다 (D-110)
+        Shortcuts = ShortcutCatalog.Resolve(_settings.Current.Shortcuts,
+                                            id => AppLog.Warn($"shortcut-invalid-{id}", null, null));
     }
 
     /// 활성 상태를 IsEnabled 바인딩과 코드 양쪽에서 정하지 않는다 — 판정은 CanExecute 한 곳이다 (LL-033).
@@ -240,6 +247,84 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
     /// 도구 모음 「종료」 · Ctrl+Q. 창을 끄는 것은 View 의 일이다 — 트레이 「종료」와 같은 자리(MainWindow.RequestExit)로 간다.
     public event EventHandler? ExitRequested;
+
+    // ── 단축키 (D-110~D-114) ─────────────────────────────────────────────────
+
+    public RelayCommand OpenShortcutsCommand { get; }
+
+    /// F1 · 도구 모음 「단축키」. 목록 창은 View 가 띄운다.
+    public event EventHandler? ShortcutsRequested;
+
+    /// 지금 키 표 — 동작 id → 키 글자(없으면 null). View 가 이것으로 창의 단축키를 만든다.
+    public IReadOnlyDictionary<string, string?> Shortcuts { get; private set; }
+
+    /// 키가 바뀌었다 — View 가 창의 단축키를 다시 만든다.
+    public event EventHandler? ShortcutsChanged;
+
+    /// 동작 id 의 명령. 목록에 없는 id 면 null.
+    public System.Windows.Input.ICommand? CommandFor(string id) => id switch
+    {
+        "save" => SaveCommand,
+        "closeTab" => CloseActiveTabCommand,
+        "findBar" => OpenFindBarCommand,
+        "searchVault" => OpenSearchWindowCommand,
+        "findNext" => FindNextCommand,
+        "findPrev" => FindPrevCommand,
+        "closeFindBar" => CloseFindBarCommand,
+        "refresh" => RefreshCommand,
+        "shortcuts" => OpenShortcutsCommand,
+        "exit" => ExitCommand,
+        "newDocument" => NewDocumentCommand,
+        "newFolder" => NewFolderCommand,
+        "rename" => RenameCommand,
+        "delete" => DeleteCommand,
+        "copyAll" => CopyAllCommand,
+        "openBackup" => OpenBackupCommand,
+        "emptyTrash" => EmptyTrashCommand,
+        "changeRoot" => ChangeRootCommand,
+        "changeKey" => ChangeKeyCommand,
+        "lock" => LockCommand,
+        "closeAllTabs" => CloseAllTabsCommand,
+        "openInExplorer" => OpenInExplorerCommand,
+        _ => null,
+    };
+
+    /// <summary>
+    /// 새 키 표를 저장하고 바로 적용한다. 저장에 실패해도 이번 실행에는 적용한다 — 알리기만 한다.
+    /// 겹침 · 막힌 키 검사는 목록 창(ShortcutsViewModel)이 먼저 한다.
+    /// </summary>
+    public async Task SetShortcutsAsync(IReadOnlyDictionary<string, string?> map)
+    {
+        Shortcuts = map;
+        _settings.Current.Shortcuts = map.ToDictionary(p => p.Key, p => p.Value ?? "");
+        RaiseShortcutText();
+        ShortcutsChanged?.Invoke(this, EventArgs.Empty);
+
+        try { await _settings.SaveAsync(); }
+        catch (Exception ex)
+        {
+            AppLog.Error("shortcut-save", null, ex);
+            _dialogs.Error("단축키 저장 실패", "바꾼 키는 지금만 쓰이고, 다시 켜면 예전 키로 돌아갑니다.");
+        }
+    }
+
+    private string KeySuffix(string id) => Shortcuts.TryGetValue(id, out var key) && key is not null ? $" ({key})" : "";
+
+    // 툴팁에 적힌 키가 바꾼 키를 따라간다
+    public string ExitToolTip => $"종료{KeySuffix("exit")} — 열린 문서를 저장하고 끕니다. 키도 지워집니다";
+    public string CloseFindBarToolTip => $"닫기{KeySuffix("closeFindBar")}";
+    public string FindNextToolTip => Shortcuts["findNext"] is { } key ? $"다음 (Enter · {key})" : "다음 (Enter)";
+    public string FindPrevToolTip => Shortcuts["findPrev"] is { } key ? $"이전 (Shift+Enter · {key})" : "이전 (Shift+Enter)";
+    public string ShortcutsToolTip => $"단축키 보기 · 바꾸기{KeySuffix("shortcuts")}";
+
+    private void RaiseShortcutText()
+    {
+        Raise(nameof(ExitToolTip));
+        Raise(nameof(CloseFindBarToolTip));
+        Raise(nameof(FindNextToolTip));
+        Raise(nameof(FindPrevToolTip));
+        Raise(nameof(ShortcutsToolTip));
+    }
 
     /// <summary>
     /// 창을 띄우는 것은 View 의 일이다 (D-013) — ViewModel 은 요청만 낸다.
@@ -920,7 +1005,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
             // 사용자는 금고 전체가 사라졌다고 오해한다 (D-041).
             AppLog.Error(action, null, ex);
             _dialogs.Error($"{action} 실패",
-                "이 항목을 찾을 수 없습니다.\n\n밖에서 이름이 바뀌었거나 지워졌을 수 있습니다. F5 로 새로고침하세요.");
+                "이 항목을 찾을 수 없습니다.\n\n밖에서 이름이 바뀌었거나 지워졌을 수 있습니다. 도구 모음 [새로고침](기본 F5)으로 새로고침하세요.");
         }
         catch (DirectoryNotFoundException)
         {
@@ -1215,7 +1300,10 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
 
         var parent = Path.GetDirectoryName(Selected.FullPath)!;
         var directlyUnderRoot = string.Equals(PathRules.NormalizeFull(parent), _tree.Root, StringComparison.OrdinalIgnoreCase);
-        var check = PathRules.CheckName(input, directlyUnderRoot);
+
+        // 문서는 원래 확장자를 뗀 줄기로 검사한다 — 「.txt」만 쓰면 줄기가 비어 이름이 없는 파일이 된다 (D-122)
+        var name = Selected.IsFolder ? input : TreeService.StemOf(input, Path.GetExtension(Selected.FullPath));
+        var check = PathRules.CheckName(name, directlyUnderRoot);
         if (check != NameCheckResult.Ok)
         {
             _dialogs.Error("이름 오류", PathRules.MessageFor(check));
@@ -1323,9 +1411,8 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         // 사용자가 한 번 더 열어보면 생길 거라고 오해한다.
         if (Selected.IsPlainText)
         {
-            _dialogs.Error("되돌릴 지점 없음",
-                "암호화되지 않은 참고 파일에는 앱이 이력을 남기지 않습니다. "
-                + "고칠 수 없으므로 되돌릴 대상도 없습니다.");
+            // 평문 사본을 늘리지 않는다 (D-117)
+            _dialogs.Error("되돌릴 지점 없음", "평문(.txt)은 사본을 남기지 않아 되돌릴 지점이 없습니다.");
             return;
         }
 
@@ -1385,7 +1472,7 @@ public sealed class ShellViewModel : ObservableObject, IDisposable
         if (!opened)
         {
             _dialogs.Error(title,
-                "이 항목을 찾을 수 없습니다.\n\n밖에서 이름이 바뀌었거나 지워졌을 수 있습니다. F5 로 새로고침하세요.");
+                "이 항목을 찾을 수 없습니다.\n\n밖에서 이름이 바뀌었거나 지워졌을 수 있습니다. 도구 모음 [새로고침](기본 F5)으로 새로고침하세요.");
         }
     }
 
